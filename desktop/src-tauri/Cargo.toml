@@ -1,0 +1,38 @@
+[package]
+name = "mockproxyrs"
+version = "0.1.0"
+description = "A Tauri App for proxy and mock"
+authors = ["mazao"]
+edition = "2021"
+
+[lib]
+name = "mockproxyrs_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { workspace = true }
+tauri-plugin-opener = { workspace = true }
+
+# Core library
+mockproxyrs-core = { path = "../../core" }
+
+# Async
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+log = { workspace = true }
+fast_log = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# Directories
+dirs = "6.0"

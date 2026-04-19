@@ -1,0 +1,46 @@
+[package]
+name = "mockproxyrs-core"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 异步运行时
+tokio = { workspace = true }
+
+# HTTP
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+hyper-tls = { workspace = true }
+native-tls = { workspace = true }
+tokio-native-tls = { workspace = true }
+
+# 序列化
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# 错误处理
+thiserror = { workspace = true }
+
+# 数据库
+r2d2 = { workspace = true }
+r2d2_sqlite = { workspace = true }
+rusqlite = { workspace = true }
+
+# 异步 trait
+async-trait = { workspace = true }
+
+# 解压
+flate2 = { workspace = true }
+
+# 日志
+log = { workspace = true }
+
+# UUID
+uuid = { workspace = true }
+
+# 正则表达式
+regex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
