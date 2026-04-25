@@ -197,12 +197,12 @@ impl ProxyServer {
                         regex: Some(regex),
                     },
                 );
-            } else {
-                matcher.exact_match_map.insert(
-                    (rule.url_pattern.clone(), rule.method.to_string()),
-                    rule.id.clone(),
-                );
             }
+        } else {
+            matcher.exact_match_map.insert(
+                (rule.url_pattern.clone(), rule.method.to_string()),
+                rule.id.clone(),
+            );
         }
 
         rules.insert(rule.id.clone(), rule);
