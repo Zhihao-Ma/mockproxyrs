@@ -251,12 +251,12 @@ async fn handle_request(
     let matcher_guard = matcher.read().await;
     let matched_rule = matcher_guard.match_rule(method.as_str(), &url, &rules_guard);
 
-    let is_mock = matched_rule.map_or(false, |r| r.enabled);
-    let forward_and_record = matched_rule.map_or(false, |r| r.forward_and_record);
+    let is_mock = matched_rule.is_some_and(|r| r.enabled);
+    let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
     let mock_response = matched_rule.map(|r| r.mock_response.clone());
-    let url_pattern = matched_rule.map_or(None, |r| Some(r.url_pattern.clone()));
-    let is_regex = matched_rule.map_or(false, |r| r.is_regex);
+    let url_pattern = matched_rule.map(|r| r.url_pattern.clone());
+    let is_regex = matched_rule.is_some_and(|r| r.is_regex);
 
     info!(
         "Request: {} {}, mock: {}, forward_and_record: {}",

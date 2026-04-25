@@ -226,10 +226,10 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
         params.service_id.expect("service_id expect!"),
         params.url_pattern.expect("url_pattern expect!"),
         is_regex,
-        parse_method(&params.method.unwrap_or(String::default())),
+        parse_method(&params.method.unwrap_or_default()),
         params.enabled.unwrap_or(false),
         params.forward_and_record.unwrap_or(false),
-        params.mock_response.unwrap_or(String::default()),
+        params.mock_response.unwrap_or_default(),
     );
 
     state
