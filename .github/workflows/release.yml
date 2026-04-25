@@ -2,8 +2,8 @@ name: Release App
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - 'test'  # 新建一个测试分支
 
 permissions:
   contents: write
