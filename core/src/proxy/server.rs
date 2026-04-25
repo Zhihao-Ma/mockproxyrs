@@ -12,7 +12,7 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::{error, info};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, watch};
 
 use crate::domain::{MockRule, MockService, ResponseEvent};
 use crate::error::{MockproxyrsError, Result};
@@ -35,7 +35,7 @@ pub struct ProxyServer {
     /// 上游客户端
     client: UpstreamClient,
     /// 关闭信号发送器
-    pub shutdown_tx: mpsc::Sender<()>,
+    pub shutdown_tx: watch::Sender<bool>,
 }
 
 impl ProxyServer {
@@ -45,7 +45,7 @@ impl ProxyServer {
         rules: Arc<RwLock<HashMap<String, MockRule>>>,
         event_emitter: Arc<dyn EventEmitter>,
         matcher: Arc<RwLock<RuleMatcher>>,
-        shutdown_tx: mpsc::Sender<()>,
+        shutdown_tx: watch::Sender<bool>,
     ) -> Self {
         Self {
             config,
@@ -64,7 +64,7 @@ impl ProxyServer {
     ///
     /// # Returns
     /// 成功返回 Ok(())，失败返回错误
-    pub async fn start(&self, mut shutdown_rx: mpsc::Receiver<()>) -> Result<()> {
+    pub async fn start(&self, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
         let addr: SocketAddr = self.config.listen_addr.parse().map_err(|e| {
             MockproxyrsError::InvalidAddress(format!("{}: {}", self.config.listen_addr, e))
         })?;
@@ -91,6 +91,7 @@ impl ProxyServer {
                             let emitter = self.event_emitter.clone();
                             let client = self.client.clone();
 
+                            let mut shutdown_rx_for_conn = shutdown_rx.clone();
                             tokio::spawn(async move {
                                 let service = service_fn(move |req| {
                                     let config = config.clone();
@@ -103,8 +104,17 @@ impl ProxyServer {
                                     }
                                 });
 
-                                if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                                    error!("Error serving connection: {:?}", err);
+                                tokio::select!{
+                                    result = http1::Builder::new()
+                                        .serve_connection(io, service)
+                                            => {
+                                        if let Err(err) = result {
+                                            error!("Error serving connection: {:?}", err);
+                                        }
+                                    }
+                                    _ = shutdown_rx_for_conn.changed() => {
+                                        info!("Connection received shutdown signal, finishing current request and closing...");
+                                    }
                                 }
                             });
                         }
@@ -115,7 +125,7 @@ impl ProxyServer {
                 }
 
                 // 接收关闭信号
-                _ = shutdown_rx.recv() => {
+                _ = shutdown_rx.changed() => {
                     info!("Shutdown signal received, stopping server {}", self.config.id);
                     break;
                 }
