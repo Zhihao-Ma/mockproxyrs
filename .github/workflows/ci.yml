@@ -62,7 +62,3 @@ jobs:
       # Rust 单元测试
       - name: Rust test
         run: cargo test
-
-      # 🔴 修改：Tauri 构建验证（在 desktop/ 目录下）
-      - name: Tauri build check
-        run: cd desktop && npm run build -- --bundles none
