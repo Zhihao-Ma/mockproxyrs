@@ -12,7 +12,7 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::{error, info};
 use tokio::net::TcpListener;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, watch};
 
 use crate::domain::{MockRule, MockService, ResponseEvent};
 use crate::error::{MockproxyrsError, Result};
@@ -35,7 +35,7 @@ pub struct ProxyServer {
     /// 上游客户端
     client: UpstreamClient,
     /// 关闭信号发送器
-    pub shutdown_tx: mpsc::Sender<()>,
+    pub shutdown_tx: watch::Sender<bool>,
 }
 
 impl ProxyServer {
@@ -45,7 +45,7 @@ impl ProxyServer {
         rules: Arc<RwLock<HashMap<String, MockRule>>>,
         event_emitter: Arc<dyn EventEmitter>,
         matcher: Arc<RwLock<RuleMatcher>>,
-        shutdown_tx: mpsc::Sender<()>,
+        shutdown_tx: watch::Sender<bool>,
     ) -> Self {
         Self {
             config,
@@ -64,7 +64,7 @@ impl ProxyServer {
     ///
     /// # Returns
     /// 成功返回 Ok(())，失败返回错误
-    pub async fn start(&self, mut shutdown_rx: mpsc::Receiver<()>) -> Result<()> {
+    pub async fn start(&self, mut shutdown_rx: watch::Receiver<bool>) -> Result<()> {
         let addr: SocketAddr = self.config.listen_addr.parse().map_err(|e| {
             MockproxyrsError::InvalidAddress(format!("{}: {}", self.config.listen_addr, e))
         })?;
@@ -91,6 +91,7 @@ impl ProxyServer {
                             let emitter = self.event_emitter.clone();
                             let client = self.client.clone();
 
+                            let mut shutdown_rx_for_conn = shutdown_rx.clone();
                             tokio::spawn(async move {
                                 let service = service_fn(move |req| {
                                     let config = config.clone();
@@ -103,8 +104,17 @@ impl ProxyServer {
                                     }
                                 });
 
-                                if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-                                    error!("Error serving connection: {:?}", err);
+                                tokio::select!{
+                                    result = http1::Builder::new()
+                                        .serve_connection(io, service)
+                                            => {
+                                        if let Err(err) = result {
+                                            error!("Error serving connection: {:?}", err);
+                                        }
+                                    }
+                                    _ = shutdown_rx_for_conn.changed() => {
+                                        info!("Connection received shutdown signal, finishing current request and closing...");
+                                    }
                                 }
                             });
                         }
@@ -115,7 +125,7 @@ impl ProxyServer {
                 }
 
                 // 接收关闭信号
-                _ = shutdown_rx.recv() => {
+                _ = shutdown_rx.changed() => {
                     info!("Shutdown signal received, stopping server {}", self.config.id);
                     break;
                 }
@@ -187,12 +197,12 @@ impl ProxyServer {
                         regex: Some(regex),
                     },
                 );
-            } else {
-                matcher.exact_match_map.insert(
-                    (rule.url_pattern.clone(), rule.method.to_string()),
-                    rule.id.clone(),
-                );
             }
+        } else {
+            matcher.exact_match_map.insert(
+                (rule.url_pattern.clone(), rule.method.to_string()),
+                rule.id.clone(),
+            );
         }
 
         rules.insert(rule.id.clone(), rule);
@@ -241,12 +251,12 @@ async fn handle_request(
     let matcher_guard = matcher.read().await;
     let matched_rule = matcher_guard.match_rule(method.as_str(), &url, &rules_guard);
 
-    let is_mock = matched_rule.map_or(false, |r| r.enabled);
-    let forward_and_record = matched_rule.map_or(false, |r| r.forward_and_record);
+    let is_mock = matched_rule.is_some_and(|r| r.enabled);
+    let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
     let mock_response = matched_rule.map(|r| r.mock_response.clone());
-    let url_pattern = matched_rule.map_or(None, |r| Some(r.url_pattern.clone()));
-    let is_regex = matched_rule.map_or(false, |r| r.is_regex);
+    let url_pattern = matched_rule.map(|r| r.url_pattern.clone());
+    let is_regex = matched_rule.is_some_and(|r| r.is_regex);
 
     info!(
         "Request: {} {}, mock: {}, forward_and_record: {}",

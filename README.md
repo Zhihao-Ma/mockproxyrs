@@ -84,7 +84,7 @@ cd desktop && npm install
 ```bash
 # 启动桌面应用 (开发模式)
 cd desktop
-npm run dev
+npm run tauri dev
 ```
 
 这将同时启动：
@@ -96,7 +96,7 @@ npm run dev
 ```bash
 # 构建桌面应用
 cd desktop
-npm run build
+npm run tauri build
 ```
 
 构建产物位于 `desktop/src-tauri/target/release/bundle/` 目录。

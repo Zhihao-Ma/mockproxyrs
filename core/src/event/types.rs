@@ -68,17 +68,4 @@ mod tests {
         let result = emitter.emit(event).await;
         assert!(result.is_ok());
     }
-
-    #[test]
-    fn test_noop_emitter_default() {
-        let emitter = NoopEmitter::default();
-        let _ = emitter;
-    }
-
-    #[test]
-    fn test_noop_emitter_clone() {
-        let emitter = NoopEmitter;
-        let cloned = emitter.clone();
-        let _ = cloned;
-    }
 }

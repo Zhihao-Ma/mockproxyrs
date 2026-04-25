@@ -152,7 +152,7 @@ pub async fn start_service(id: String, state: State<'_, AppState>) -> Result<(),
     let rules = Arc::new(RwLock::new(rules_map));
 
     // 创建关闭通道
-    let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel(1);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // 获取事件发射器
     let emitter: Arc<dyn mockproxyrs_core::event::EventEmitter> = {
@@ -197,8 +197,7 @@ pub async fn stop_service(id: String, state: State<'_, AppState>) -> Result<(), 
     // 发送关闭信号
     running
         .shutdown_tx
-        .send(())
-        .await
+        .send(true)
         .map_err(|e| format!("发送关闭信号失败: {}", e))?;
 
     Ok(())
@@ -227,10 +226,10 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
         params.service_id.expect("service_id expect!"),
         params.url_pattern.expect("url_pattern expect!"),
         is_regex,
-        parse_method(&params.method.unwrap_or(String::default())),
+        parse_method(&params.method.unwrap_or_default()),
         params.enabled.unwrap_or(false),
         params.forward_and_record.unwrap_or(false),
-        params.mock_response.unwrap_or(String::default()),
+        params.mock_response.unwrap_or_default(),
     );
 
     state

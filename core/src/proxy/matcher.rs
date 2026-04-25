@@ -135,10 +135,10 @@ impl RuleMatcher {
             self.exact_match_map
                 .get(&(path.to_string(), Method::All.to_string()))
         };
-        if let Some(rule_id) = rule_opt {
-            if let Some(rule) = rules.get(rule_id) {
-                return Some(rule);
-            }
+        if let Some(rule_id) = rule_opt
+            && let Some(rule) = rules.get(rule_id)
+        {
+            return Some(rule);
         }
         // 也尝试完整 URL（包含查询参数）的精确匹配
         if path != url {
@@ -151,24 +151,24 @@ impl RuleMatcher {
                 self.exact_match_map
                     .get(&(url.to_string(), Method::All.to_string()))
             };
-            if let Some(rule_id) = rule_opt {
-                if let Some(rule) = rules.get(rule_id) {
-                    return Some(rule);
-                }
+            if let Some(rule_id) = rule_opt
+                && let Some(rule) = rules.get(rule_id)
+            {
+                return Some(rule);
             }
         }
 
         // 2. 再尝试正则匹配
-        for (_, compiled) in &self.regex_rules {
+        for compiled in self.regex_rules.values() {
             if let Some(rule) = rules.get(&compiled.rule_id) {
                 if !rule.method.matches(method) {
                     continue;
                 }
 
-                if let Some(ref regex) = compiled.regex {
-                    if regex.is_match(path) {
-                        return Some(rule);
-                    }
+                if let Some(ref regex) = compiled.regex
+                    && regex.is_match(path)
+                {
+                    return Some(rule);
                 }
             }
         }
