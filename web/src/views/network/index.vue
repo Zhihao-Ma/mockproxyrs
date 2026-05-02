@@ -51,9 +51,10 @@ async function applyRule(row: ResponseEvent) {
   console.log(row);
   if (!row.matchedRuleId) {
   // 没有匹配的规则直接新增
+    const path = row.url.split('?')[0];
     await addRule({
       serviceId: row.serviceId,
-      urlPattern: row.url,
+      urlPattern: path,
       mockResponse: row.responseBody,
       enabled: true,
     })
