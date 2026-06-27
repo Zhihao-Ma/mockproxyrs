@@ -92,7 +92,7 @@ fn adjust_line_numbers(text: &str) -> String {
     re.replace_all(text, |caps: &regex::Captures| {
         let line: usize = caps[1].parse().unwrap_or(1);
         let col: usize = caps[2].parse().unwrap_or(1);
-        format!("<input>:{}:{}", line.saturating_sub(1), col)
+        format!("<input>:{}:{}", line.saturating_sub(2), col)
     })
     .into_owned()
 }
