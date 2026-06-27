@@ -32,7 +32,8 @@ pub(crate) fn execute_script_blocking(
     request: RequestContext,
     script: &str,
 ) -> Result<ScriptMockResponse> {
-    let source = format!("(function(){{\n{}\n}})()", script);
+    let literal = serde_json::to_string(script).expect("serializing a string literal cannot fail");
+    let source = format!("new Function({})()", literal);
     engine.with_limited_context(|ctx| {
         inject_request(ctx.clone(), &request)?;
         inject_console(ctx.clone())?;

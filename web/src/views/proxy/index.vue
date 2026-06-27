@@ -120,8 +120,8 @@ async function handleValidateScript(index: number) {
     rule.script = formatScript(script);
     saveRule(index);
     ElMessage.success("脚本语法校验通过");
-  } catch (error) {
-    ElMessage.warning(String(error));
+  } catch {
+    // API 层已显示错误信息
   }
 }
 
