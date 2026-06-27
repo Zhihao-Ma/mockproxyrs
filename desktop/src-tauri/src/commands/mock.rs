@@ -230,6 +230,8 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
         params.enabled.unwrap_or(false),
         params.forward_and_record.unwrap_or(false),
         params.mock_response.unwrap_or_default(),
+        params.script,
+        params.delay_ms,
     );
 
     state
@@ -269,6 +271,8 @@ pub async fn update_rule(
         enabled,
         forward_and_record,
         mock_response,
+        None,
+        None,
     );
 
     state

@@ -131,6 +131,12 @@ pub struct MockRule {
     pub forward_and_record: bool,
     /// mock 响应内容
     pub mock_response: String,
+    /// JS 脚本内容（为空则使用静态 mock_response）
+    #[serde(default)]
+    pub script: Option<String>,
+    /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
+    #[serde(default)]
+    pub delay_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -151,6 +157,12 @@ pub struct MockRuleDTO {
     pub forward_and_record: Option<bool>,
     /// mock 响应内容
     pub mock_response: Option<String>,
+    /// JS 脚本内容（为空则使用静态 mock_response）
+    #[serde(default)]
+    pub script: Option<String>,
+    /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
+    #[serde(default)]
+    pub delay_ms: Option<u64>,
 }
 
 impl MockRule {
@@ -163,6 +175,8 @@ impl MockRule {
         enabled: bool,
         forward_and_record: bool,
         mock_response: String,
+        script: Option<String>,
+        delay_ms: Option<u64>,
     ) -> Self {
         Self {
             id,
@@ -173,6 +187,8 @@ impl MockRule {
             enabled,
             forward_and_record,
             mock_response,
+            script,
+            delay_ms,
         }
     }
 }
@@ -367,6 +383,8 @@ mod tests {
             true,
             false,
             r#"{"code": 200}"#.to_string(),
+            None,
+            None,
         );
 
         assert_eq!(rule.id, "rule-1");
@@ -500,7 +518,31 @@ mod tests {
             true,
             true,
             r#"{"code": 201}"#.to_string(),
+            None,
+            None,
         );
+
+        let json = serde_json::to_string(&rule).unwrap();
+        let parsed: MockRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, rule);
+    }
+
+    #[test]
+    fn test_mock_rule_serde_defaults_script_and_delay() {
+        let json = r#"{
+            "id":"rule-1",
+            "serviceId":"svc-1",
+            "urlPattern":"/api/users",
+            "isRegex":false,
+            "method":"GET",
+            "enabled":true,
+            "forwardAndRecord":false,
+            "mockResponse":"{}"
+        }"#;
+
+        let rule: MockRule = serde_json::from_str(json).unwrap();
+        assert_eq!(rule.script, None);
+        assert_eq!(rule.delay_ms, None);
 
         let json = serde_json::to_string(&rule).unwrap();
         let parsed: MockRule = serde_json::from_str(&json).unwrap();

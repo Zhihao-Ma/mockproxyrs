@@ -75,6 +75,8 @@ impl SqliteRepository {
                 enabled INTEGER NOT NULL DEFAULT 1,
                 forward_and_record INTEGER NOT NULL DEFAULT 0,
                 mock_response TEXT,
+                script TEXT,
+                delay_ms INTEGER,
                 FOREIGN KEY (service_id) REFERENCES mock_service(id) ON DELETE CASCADE
             );
 
@@ -198,7 +200,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
                  FROM mock_rule WHERE service_id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -218,6 +220,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
+                script: row.get(8)?,
+                delay_ms: row.get(9)?,
                 })
             })
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?
@@ -231,7 +235,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
                  FROM mock_rule WHERE id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -251,6 +255,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
+                script: row.get(8)?,
+                delay_ms: row.get(9)?,
                 })
             })
             .optional()
@@ -265,15 +271,17 @@ impl MockRepository for SqliteRepository {
 
         let method = Self::method_to_string(&rule.method);
         conn.execute(
-            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                ON CONFLICT(id) DO UPDATE SET
                    url_pattern = excluded.url_pattern,
                    is_regex = excluded.is_regex,
                    method = excluded.method,
                    enabled = excluded.enabled,
                    forward_and_record = excluded.forward_and_record,
-                   mock_response = excluded.mock_response"#,
+                   mock_response = excluded.mock_response,
+                   script = excluded.script,
+                   delay_ms = excluded.delay_ms"#,
             params![
                 rule.id,
                 rule.service_id,
@@ -282,7 +290,9 @@ impl MockRepository for SqliteRepository {
                 method,
                 rule.enabled as i32,
                 rule.forward_and_record as i32,
-                rule.mock_response
+                rule.mock_response,
+                rule.script.as_deref(),
+                rule.delay_ms.map(|v| v as i64),
             ],
         )
         .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -369,6 +379,8 @@ mod tests {
             true,
             false,
             r#"{"code": 200}"#.to_string(),
+            None,
+            None,
         );
 
         // Create
@@ -438,6 +450,8 @@ mod tests {
             true,
             false,
             r#"{"code": 200}"#.to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -451,6 +465,8 @@ mod tests {
             false,
             true,
             r#"{"code": 201}"#.to_string(),
+            None,
+            None,
         );
         repo.save_rule(&updated).await.unwrap();
 
@@ -537,6 +553,8 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
         }
@@ -579,6 +597,8 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
 
@@ -609,6 +629,8 @@ mod tests {
             true,
             false,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule_enabled).await.unwrap();
 
@@ -621,6 +643,8 @@ mod tests {
             false,
             false,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule_disabled).await.unwrap();
 
@@ -652,6 +676,8 @@ mod tests {
             true,
             true,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -699,6 +725,8 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
         }
