@@ -122,6 +122,11 @@ export function deleteRulesByService(serviceId: string): Promise<void> {
   return request<void>("delete_rules_by_service", { serviceId });
 }
 
+/** 校验 JS 脚本语法（仅诊断，不影响保存） */
+export function validateScript(script: string): Promise<void> {
+  return request<void>("validate_script", { script });
+}
+
 // ==================== 事件通道 ====================
 
 /** 创建事件通道 */

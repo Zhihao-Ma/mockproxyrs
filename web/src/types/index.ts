@@ -70,6 +70,10 @@ export interface MockRule {
   forwardAndRecord: boolean;
   /** mock 响应内容 */
   mockResponse: string;
+  /** JS 脚本内容（为空则使用静态 mockResponse） */
+  script?: string | null;
+  /** 延迟响应毫秒数 */
+  delayMs?: number | null;
 }
 
 /**
@@ -139,6 +143,8 @@ export interface CreateRuleParams {
   enabled: boolean;
   forwardAndRecord?: boolean;
   mockResponse: string;
+  script?: string | null;
+  delayMs?: number | null;
 }
 
 /**
@@ -153,4 +159,6 @@ export interface UpdateRuleParams {
   enabled: boolean;
   forwardAndRecord: boolean;
   mockResponse: string;
+  script?: string | null;
+  delayMs?: number | null;
 }
