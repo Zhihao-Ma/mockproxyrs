@@ -29,7 +29,8 @@ impl ScriptEngine {
     pub fn validate(&self, script: &str) -> Result<()> {
         let source = format!("new Function({})", json_string_literal(script));
         self.with_limited_context(|ctx| {
-            ctx.eval::<(), _>(source).map_err(to_script_error)?;
+            ctx.eval::<(), _>(source)
+                .map_err(|e| to_detailed_script_error(&ctx, e))?;
             Ok(())
         })
     }
@@ -62,6 +63,25 @@ fn json_string_literal(value: &str) -> String {
 
 /// 将 rquickjs 错误转换为统一的 MockproxyrsError::Script。
 pub(crate) fn to_script_error(error: rquickjs::Error) -> MockproxyrsError {
+    MockproxyrsError::Script(error.to_string())
+}
+
+/// 捕获 JS 异常的详细信息（message + stack），方便调试。
+pub(crate) fn to_detailed_script_error(
+    ctx: &rquickjs::Ctx<'_>,
+    error: rquickjs::Error,
+) -> MockproxyrsError {
+    let caught = ctx.catch();
+    if let Some(obj) = caught.as_object() {
+        let message: Option<String> = obj.get("message").ok();
+        let stack: Option<String> = obj.get("stack").ok();
+        if let Some(stack) = stack {
+            return MockproxyrsError::Script(stack);
+        }
+        if let Some(msg) = message {
+            return MockproxyrsError::Script(msg);
+        }
+    }
     MockproxyrsError::Script(error.to_string())
 }
 

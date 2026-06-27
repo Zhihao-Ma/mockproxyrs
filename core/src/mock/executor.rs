@@ -1,6 +1,6 @@
 use crate::error::{MockproxyrsError, Result};
 use crate::mock::context::RequestContext;
-use crate::mock::engine::{ScriptEngine, to_script_error};
+use crate::mock::engine::{to_detailed_script_error, to_script_error, ScriptEngine};
 use rquickjs::{Function, Object, Value, prelude::Rest};
 use std::collections::HashMap;
 
@@ -41,21 +41,6 @@ pub(crate) fn execute_script_blocking(
             .map_err(|e| to_detailed_script_error(&ctx, e))?;
         normalize_response(ctx, value)
     })
-}
-
-fn to_detailed_script_error<'js>(ctx: &rquickjs::Ctx<'js>, error: rquickjs::Error) -> MockproxyrsError {
-    let caught = ctx.catch();
-    if let Some(obj) = caught.as_object() {
-        let message: Option<String> = obj.get("message").ok();
-        let stack: Option<String> = obj.get("stack").ok();
-        if let Some(stack) = stack {
-            return MockproxyrsError::Script(stack);
-        }
-        if let Some(msg) = message {
-            return MockproxyrsError::Script(msg);
-        }
-    }
-    MockproxyrsError::Script(error.to_string())
 }
 
 fn inject_request<'js>(ctx: rquickjs::Ctx<'js>, request: &RequestContext) -> Result<()> {
