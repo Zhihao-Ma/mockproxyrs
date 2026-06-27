@@ -117,10 +117,35 @@ async function handleValidateScript(index: number) {
   const script = rule.script || "";
   try {
     await validateScript(script);
+    rule.script = formatScript(script);
+    saveRule(index);
     ElMessage.success("脚本语法校验通过");
   } catch (error) {
     ElMessage.warning(String(error));
   }
+}
+
+function formatScript(source: string): string {
+  const lines = source.split("\n");
+  let indent = 0;
+  const formatted = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return "";
+    // 减少缩进：以 } 或 ] 开头的行
+    if (trimmed.startsWith("}") || trimmed.startsWith("]")) {
+      indent = Math.max(0, indent - 1);
+    }
+    const result = "  ".repeat(indent) + trimmed;
+    // 增加缩进：以 { 或 [ 结尾且不是 } 或 ] 开头（避免 "{}" 双计数）
+    const opens = (trimmed.match(/\{/g) || []).length;
+    const closes = (trimmed.match(/\}/g) || []).length;
+    const openBrackets = (trimmed.match(/\[/g) || []).length;
+    const closeBrackets = (trimmed.match(/\]/g) || []).length;
+    indent += opens - closes + openBrackets - closeBrackets;
+    indent = Math.max(0, indent);
+    return result;
+  });
+  return formatted.join("\n").trim();
 }
 
 async function handleDeleteRule(index: number) {
