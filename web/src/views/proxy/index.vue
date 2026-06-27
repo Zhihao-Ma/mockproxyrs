@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
 import type { MockRule, Method } from "@/types";
 
@@ -25,6 +25,8 @@ const form = reactive({
 
 const rules = ref<MockRule[]>([]);
 const isRunning = ref(false);
+/** 脚本校验错误，key 为规则在 rules 中的索引 */
+const scriptErrors = ref<Record<number, string>>({});
 
 async function handleStart() {
   await updateService({...form})
@@ -118,10 +120,10 @@ async function handleValidateScript(index: number) {
   try {
     await validateScript(script);
     rule.script = formatScript(script);
+    delete scriptErrors.value[index];
     saveRule(index);
-    ElMessage.success("脚本语法校验通过");
-  } catch {
-    // API 层已显示错误信息
+  } catch (error) {
+    scriptErrors.value[index] = String(error);
   }
 }
 
@@ -395,6 +397,9 @@ watch(
                   placeholder="return { code: 0, data: request.query };"
                   @blur="saveRule(index)"
                 />
+                <div v-if="scriptErrors[index]" class="script-error">
+                  {{ scriptErrors[index] }}
+                </div>
               </div>
             </div>
           </div>
@@ -626,6 +631,20 @@ watch(
 
 .regex-toggle.active:hover {
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.script-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #fef0f0;
+  border: 1px solid #fde2e2;
+  border-radius: 6px;
+  color: #f56c6c;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: "SF Mono", Monaco, Consolas, monospace;
 }
 
 .highlight-flash {
