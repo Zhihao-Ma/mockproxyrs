@@ -26,6 +26,7 @@ use tokio::sync::RwLock;
 
 use mockproxyrs_core::domain::ResponseEvent;
 use mockproxyrs_core::event::EventEmitter;
+use mockproxyrs_core::mock::ScriptEngine;
 use mockproxyrs_core::proxy::ProxyServer;
 use mockproxyrs_core::repository::SqliteRepository;
 
@@ -39,14 +40,17 @@ pub struct AppState {
     pub repository: Arc<SqliteRepository>,
     /// 事件通道（用于向前端推送响应事件）
     pub event_channel: Arc<RwLock<Option<Channel<ResponseEvent>>>>,
+    /// JS 脚本引擎
+    pub script_engine: Arc<ScriptEngine>,
 }
 
 impl AppState {
     /// 创建新的应用状态
-    pub fn new(repository: SqliteRepository) -> Self {
+    pub fn new(repository: SqliteRepository, script_engine: ScriptEngine) -> Self {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
             repository: Arc::new(repository),
+            script_engine: Arc::new(script_engine),
             event_channel: Arc::new(RwLock::new(None)),
         }
     }

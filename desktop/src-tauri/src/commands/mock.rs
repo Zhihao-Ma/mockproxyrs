@@ -171,6 +171,7 @@ pub async fn start_service(id: String, state: State<'_, AppState>) -> Result<(),
         rules.clone(),
         emitter,
         matcher.clone(),
+        state.script_engine.clone(),
         shutdown_tx,
     ));
     let running_service = server.clone();
@@ -371,4 +372,10 @@ pub async fn destroy_channel(state: State<'_, AppState>) -> Result<(), String> {
     // 查询已启动的服务，将事件通道注销
 
     Ok(())
+}
+
+/// 校验 JS 脚本语法（仅诊断，不影响保存）
+#[tauri::command]
+pub async fn validate_script(script: String, state: State<'_, AppState>) -> Result<(), String> {
+    state.script_engine.validate(&script).map_err(|e| e.to_string())
 }

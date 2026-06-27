@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use flate2::read::GzDecoder;
 use http_body_util::combinators::BoxBody;
@@ -17,6 +18,7 @@ use tokio::sync::{RwLock, watch};
 use crate::domain::{MockRule, MockService, ResponseEvent};
 use crate::error::{MockproxyrsError, Result};
 use crate::event::EventEmitter;
+use crate::mock::{execute_script, RequestContext, ScriptEngine, ScriptMockResponse};
 use crate::proxy::{CompiledRule, RuleMatcher, UpstreamClient};
 use regex::Regex;
 
@@ -34,6 +36,8 @@ pub struct ProxyServer {
     event_emitter: Arc<dyn EventEmitter>,
     /// 上游客户端
     client: UpstreamClient,
+    /// JS 脚本引擎
+    script_engine: Arc<ScriptEngine>,
     /// 关闭信号发送器
     pub shutdown_tx: watch::Sender<bool>,
 }
@@ -45,6 +49,7 @@ impl ProxyServer {
         rules: Arc<RwLock<HashMap<String, MockRule>>>,
         event_emitter: Arc<dyn EventEmitter>,
         matcher: Arc<RwLock<RuleMatcher>>,
+        script_engine: Arc<ScriptEngine>,
         shutdown_tx: watch::Sender<bool>,
     ) -> Self {
         Self {
@@ -53,6 +58,7 @@ impl ProxyServer {
             event_emitter,
             matcher,
             client: UpstreamClient::new(),
+            script_engine,
             shutdown_tx,
         }
     }
@@ -90,6 +96,7 @@ impl ProxyServer {
                             let matcher = self.matcher.clone();
                             let emitter = self.event_emitter.clone();
                             let client = self.client.clone();
+                            let script_engine = self.script_engine.clone();
 
                             let mut shutdown_rx_for_conn = shutdown_rx.clone();
                             tokio::spawn(async move {
@@ -99,8 +106,9 @@ impl ProxyServer {
                                     let matcher = matcher.clone();
                                     let emitter = emitter.clone();
                                     let client = client.clone();
+                                    let script_engine = script_engine.clone();
                                     async move {
-                                        handle_request(req, config, rules, matcher, emitter, client).await
+                                        handle_request(req, config, rules, matcher, emitter, client, script_engine).await
                                     }
                                 });
 
@@ -232,6 +240,7 @@ impl ProxyServer {
         matcher.regex_rules.clear();
     }
 }
+
 /// 处理单个请求
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
@@ -240,6 +249,7 @@ async fn handle_request(
     matcher: Arc<RwLock<RuleMatcher>>,
     event_emitter: Arc<dyn EventEmitter>,
     client: UpstreamClient,
+    script_engine: Arc<ScriptEngine>,
 ) -> std::result::Result<Response<HttpBody>, hyper::Error> {
     let url = req.uri().to_string();
     let method = req.method().clone().to_string();
@@ -255,16 +265,51 @@ async fn handle_request(
     let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
     let mock_response = matched_rule.map(|r| r.mock_response.clone());
+    let script = matched_rule.and_then(|r| r.script.clone()).filter(|s| !s.trim().is_empty());
+    let delay_ms = matched_rule.and_then(|r| r.delay_ms).unwrap_or(0);
     let url_pattern = matched_rule.map(|r| r.url_pattern.clone());
     let is_regex = matched_rule.is_some_and(|r| r.is_regex);
+    drop(matcher_guard);
+    drop(rules_guard);
 
     info!(
         "Request: {} {}, mock: {}, forward_and_record: {}",
         url, config.name, is_mock, forward_and_record
     );
 
+    let mut mock_body_for_event = if is_mock { mock_response.clone() } else { None };
+
     // 决定处理方式
-    let (response, response_body) = if !is_mock || forward_and_record {
+    let (response, response_body) = if is_mock && script.is_some() {
+        let script = script.expect("script checked above");
+        let (parts, body) = req.into_parts();
+        let bytes = body.collect().await?.to_bytes();
+        let request_body = String::from_utf8_lossy(&bytes).into_owned();
+        let request_context = RequestContext::new(
+            method.clone(),
+            url.clone(),
+            headers_to_map(&parts.headers),
+            request_body,
+        );
+
+        match execute_script((*script_engine).clone(), request_context, script).await {
+            Ok(script_response) => {
+                mock_body_for_event = Some(script_response.body.clone());
+                let response = build_script_response(script_response);
+
+                if forward_and_record {
+                    info!("Script rule has forward_and_record set; body recorded from script output");
+                    (response, String::new())
+                } else {
+                    (response, String::new())
+                }
+            }
+            Err(e) => {
+                error!("Script execution failed: {}", e);
+                (build_error_response("script error"), e.to_string())
+            }
+        }
+    } else if !is_mock || forward_and_record {
         // 转发请求
         match client.forward(req, &config.target_url).await {
             Ok(resp) => {
@@ -295,6 +340,10 @@ async fn handle_request(
         (mock_resp, String::new())
     };
 
+    if delay_ms > 0 {
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+    }
+
     // 发送事件
     let event = ResponseEvent::new(
         config.id.clone(),
@@ -307,7 +356,7 @@ async fn handle_request(
         is_mock,
         forward_and_record,
         response_body,
-        if is_mock { mock_response } else { None },
+        mock_body_for_event,
     );
 
     if let Err(e) = event_emitter.emit(event).await {
@@ -315,6 +364,18 @@ async fn handle_request(
     }
 
     Ok(response)
+}
+
+fn headers_to_map(headers: &hyper::header::HeaderMap) -> HashMap<String, String> {
+    headers
+        .iter()
+        .filter_map(|(name, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|v| (name.as_str().to_lowercase(), v.to_string()))
+        })
+        .collect()
 }
 
 /// 解压响应内容
@@ -346,6 +407,17 @@ fn build_mock_response(content: &str) -> Response<HttpBody> {
         .header("Transfer-Encoding", "chunked")
         .body(full(body))
         .expect("Failed to build mock response")
+}
+
+/// 构建脚本响应
+fn build_script_response(script_response: ScriptMockResponse) -> Response<HttpBody> {
+    let mut builder = Response::builder().status(script_response.status);
+    for (key, value) in script_response.headers {
+        builder = builder.header(key, value);
+    }
+    builder
+        .body(full(script_response.body))
+        .expect("Failed to build script response")
 }
 
 /// 构建错误响应
@@ -426,6 +498,18 @@ mod tests {
             response.headers().get("Content-Type").unwrap(),
             "application/json;charset=UTF-8"
         );
+    }
+
+    #[test]
+    fn test_build_script_response() {
+        let response = build_script_response(ScriptMockResponse {
+            status: 201,
+            headers: HashMap::from([("x-test".to_string(), "ok".to_string())]),
+            body: "created".to_string(),
+        });
+
+        assert_eq!(response.status(), 201);
+        assert_eq!(response.headers().get("x-test").unwrap(), "ok");
     }
 
     #[test]
