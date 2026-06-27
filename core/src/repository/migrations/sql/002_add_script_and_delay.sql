@@ -1,0 +1,2 @@
+ALTER TABLE mock_rule ADD COLUMN script TEXT;
+ALTER TABLE mock_rule ADD COLUMN delay_ms INTEGER;
