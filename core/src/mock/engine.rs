@@ -67,6 +67,7 @@ pub(crate) fn to_script_error(error: rquickjs::Error) -> MockproxyrsError {
 }
 
 /// 捕获 JS 异常的详细信息（message + stack），方便调试。
+/// 自动修正 IIFE 包装导致的 +1 行号偏移。
 pub(crate) fn to_detailed_script_error(
     ctx: &rquickjs::Ctx<'_>,
     error: rquickjs::Error,
@@ -76,13 +77,24 @@ pub(crate) fn to_detailed_script_error(
         let message: Option<String> = obj.get("message").ok();
         let stack: Option<String> = obj.get("stack").ok();
         if let Some(stack) = stack {
-            return MockproxyrsError::Script(stack);
+            return MockproxyrsError::Script(adjust_line_numbers(&stack));
         }
         if let Some(msg) = message {
-            return MockproxyrsError::Script(msg);
+            return MockproxyrsError::Script(adjust_line_numbers(&msg));
         }
     }
-    MockproxyrsError::Script(error.to_string())
+    MockproxyrsError::Script(adjust_line_numbers(&error.to_string()))
+}
+
+/// 修正 `<input>:N:C` 中的行号 N → N-1（抵消 IIFE 包装的一行偏移）。
+fn adjust_line_numbers(text: &str) -> String {
+    let re = regex::Regex::new(r"<input>:(\d+):(\d+)").expect("static regex");
+    re.replace_all(text, |caps: &regex::Captures| {
+        let line: usize = caps[1].parse().unwrap_or(1);
+        let col: usize = caps[2].parse().unwrap_or(1);
+        format!("<input>:{}:{}", line.saturating_sub(1), col)
+    })
+    .into_owned()
 }
 
 #[cfg(test)]
