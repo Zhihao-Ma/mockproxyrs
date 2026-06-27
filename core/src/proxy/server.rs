@@ -311,7 +311,7 @@ async fn handle_request(
             }
             Err(e) => {
                 error!("Script execution failed: {}", e);
-                (build_error_response("script error"), e.to_string())
+                (build_error_response(&e.to_string()), e.to_string())
             }
         }
     } else if !is_mock || forward_and_record {

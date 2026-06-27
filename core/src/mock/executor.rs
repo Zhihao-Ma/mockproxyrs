@@ -36,9 +36,26 @@ pub(crate) fn execute_script_blocking(
     engine.with_limited_context(|ctx| {
         inject_request(ctx.clone(), &request)?;
         inject_console(ctx.clone())?;
-        let value: Value = ctx.eval(source).map_err(to_script_error)?;
+        let value = ctx
+            .eval(source)
+            .map_err(|e| to_detailed_script_error(&ctx, e))?;
         normalize_response(ctx, value)
     })
+}
+
+fn to_detailed_script_error<'js>(ctx: &rquickjs::Ctx<'js>, error: rquickjs::Error) -> MockproxyrsError {
+    let caught = ctx.catch();
+    if let Some(obj) = caught.as_object() {
+        let message: Option<String> = obj.get("message").ok();
+        let stack: Option<String> = obj.get("stack").ok();
+        if let Some(stack) = stack {
+            return MockproxyrsError::Script(stack);
+        }
+        if let Some(msg) = message {
+            return MockproxyrsError::Script(msg);
+        }
+    }
+    MockproxyrsError::Script(error.to_string())
 }
 
 fn inject_request<'js>(ctx: rquickjs::Ctx<'js>, request: &RequestContext) -> Result<()> {
