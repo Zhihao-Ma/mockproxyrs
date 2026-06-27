@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { reactive, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
-import { ElMessageBox } from "element-plus";
-import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService } from "@/api";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
 import type { MockRule, Method } from "@/types";
 
 const route = useRoute();
@@ -47,6 +47,8 @@ function addNewRule() {
     enabled: false,
     forwardAndRecord: false,
     mockResponse: "",
+    script: null,
+    delayMs: null,
   });
 }
 
@@ -64,6 +66,8 @@ async function saveRule(index: number) {
       enabled: rule.enabled,
       forwardAndRecord: rule.forwardAndRecord,
       mockResponse: rule.mockResponse,
+      script: rule.script || null,
+      delayMs: rule.delayMs ?? null,
     });
   } else {
     const id = await addRule({
@@ -74,6 +78,8 @@ async function saveRule(index: number) {
       enabled: rule.enabled,
       forwardAndRecord: rule.forwardAndRecord,
       mockResponse: rule.mockResponse,
+      script: rule.script || null,
+      delayMs: rule.delayMs ?? null,
     });
     rule.id = id;
   }
@@ -89,6 +95,32 @@ function formatJson(index: number) {
     } catch (e) {
       // ignore parse error
     }
+  }
+}
+
+function usesAdvancedMock(rule: MockRule) {
+  return Boolean(rule.script && rule.script.trim());
+}
+
+function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
+  const rule = rules.value[index];
+  if (enabled && !rule.script) {
+    rule.script = 'return { code: 0, data: {} };';
+  }
+  if (!enabled) {
+    rule.script = null;
+  }
+  saveRule(index);
+}
+
+async function handleValidateScript(index: number) {
+  const rule = rules.value[index];
+  const script = rule.script || "";
+  try {
+    await validateScript(script);
+    ElMessage.success("脚本语法校验通过");
+  } catch (error) {
+    ElMessage.warning(String(error));
   }
 }
 
@@ -289,6 +321,18 @@ watch(
                   </el-input>
                 </div>
               </div>
+              <div class="form-row">
+                <div class="form-group form-group-delay">
+                  <label class="form-label">延迟(ms)</label>
+                  <el-input-number
+                    v-model="item.delayMs"
+                    :min="0"
+                    :step="100"
+                    controls-position="right"
+                    @change="saveRule(index)"
+                  />
+                </div>
+              </div>
               <div class="form-group">
                 <label class="form-label">Mock 响应 (JSON)</label>
                 <el-input
@@ -297,6 +341,32 @@ watch(
                   :rows="6"
                   placeholder='{"code": 200, "data": {}}'
                   @blur="formatJson(index)"
+                />
+              </div>
+              <div class="form-group">
+                <div class="advanced-header">
+                  <label class="form-label">高级 Mock（JS 脚本）</label>
+                  <div class="advanced-actions">
+                    <el-switch
+                      :model-value="usesAdvancedMock(item)"
+                      @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
+                    />
+                    <el-button
+                      size="small"
+                      :disabled="!item.script"
+                      @click="handleValidateScript(index)"
+                    >
+                      校验语法
+                    </el-button>
+                  </div>
+                </div>
+                <el-input
+                  v-if="usesAdvancedMock(item)"
+                  v-model="item.script"
+                  type="textarea"
+                  :rows="8"
+                  placeholder="return { code: 0, data: request.query };"
+                  @blur="saveRule(index)"
                 />
               </div>
             </div>
@@ -533,6 +603,24 @@ watch(
 
 .highlight-flash {
   animation: highlightFlash 0.8s ease;
+}
+
+.form-group-delay {
+  width: 160px;
+  flex-shrink: 0;
+}
+
+.advanced-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.advanced-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 @keyframes highlightFlash {
