@@ -1,6 +1,6 @@
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use lazy_static::lazy_static;
-use rusqlite_migration::{Migrations, M};
+use rusqlite_migration::{M, Migrations};
 
 static SQL_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/repository/migrations/sql");
 

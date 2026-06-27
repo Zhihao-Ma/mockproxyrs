@@ -18,7 +18,7 @@ use tokio::sync::{RwLock, watch};
 use crate::domain::{MockRule, MockService, ResponseEvent};
 use crate::error::{MockproxyrsError, Result};
 use crate::event::EventEmitter;
-use crate::mock::{execute_script, RequestContext, ScriptEngine, ScriptMockResponse};
+use crate::mock::{RequestContext, ScriptEngine, ScriptMockResponse, execute_script};
 use crate::proxy::{CompiledRule, RuleMatcher, UpstreamClient};
 use regex::Regex;
 
@@ -265,7 +265,9 @@ async fn handle_request(
     let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
     let mock_response = matched_rule.map(|r| r.mock_response.clone());
-    let script = matched_rule.and_then(|r| r.script.clone()).filter(|s| !s.trim().is_empty());
+    let script = matched_rule
+        .and_then(|r| r.script.clone())
+        .filter(|s| !s.trim().is_empty());
     let delay_ms = matched_rule.and_then(|r| r.delay_ms).unwrap_or(0);
     let url_pattern = matched_rule.map(|r| r.url_pattern.clone());
     let is_regex = matched_rule.is_some_and(|r| r.is_regex);
@@ -281,6 +283,7 @@ async fn handle_request(
 
     // 决定处理方式
     let (response, response_body) = if is_mock && script.is_some() {
+        #[allow(clippy::unnecessary_unwrap)]
         let script = script.expect("script checked above");
         let (parts, body) = req.into_parts();
         let bytes = body.collect().await?.to_bytes();
@@ -298,7 +301,9 @@ async fn handle_request(
                 let response = build_script_response(script_response);
 
                 if forward_and_record {
-                    info!("Script rule has forward_and_record set; body recorded from script output");
+                    info!(
+                        "Script rule has forward_and_record set; body recorded from script output"
+                    );
                     (response, String::new())
                 } else {
                     (response, String::new())

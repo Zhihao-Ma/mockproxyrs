@@ -1,7 +1,7 @@
 use crate::error::{MockproxyrsError, Result};
 use crate::mock::context::RequestContext;
-use crate::mock::engine::{to_script_error, ScriptEngine};
-use rquickjs::{prelude::Rest, Function, Object, Value};
+use crate::mock::engine::{ScriptEngine, to_script_error};
+use rquickjs::{Function, Object, Value, prelude::Rest};
 use std::collections::HashMap;
 
 const DEFAULT_CONTENT_TYPE: &str = "application/json;charset=UTF-8";
@@ -62,7 +62,9 @@ fn inject_request<'js>(ctx: rquickjs::Ctx<'js>, request: &RequestContext) -> Res
             .set(key.as_str(), value.clone())
             .map_err(to_script_error)?;
     }
-    request_obj.set("headers", headers).map_err(to_script_error)?;
+    request_obj
+        .set("headers", headers)
+        .map_err(to_script_error)?;
 
     let query = Object::new(ctx.clone()).map_err(to_script_error)?;
     for (key, value) in &request.query {
@@ -128,20 +130,20 @@ fn format_console_args(args: Vec<Value<'_>>) -> String {
         .join(" ")
 }
 
-fn normalize_response<'js>(ctx: rquickjs::Ctx<'js>, value: Value<'js>) -> Result<ScriptMockResponse> {
+fn normalize_response<'js>(
+    ctx: rquickjs::Ctx<'js>,
+    value: Value<'js>,
+) -> Result<ScriptMockResponse> {
     if value.is_undefined() {
         return Err(MockproxyrsError::Script(
             "script returned undefined; use `return` to produce a response".to_string(),
         ));
     }
 
-    if let Some(object) = value.as_object() {
-        if object
-            .contains_key("status")
-            .map_err(to_script_error)?
-        {
-            return parse_full_response(object);
-        }
+    if let Some(object) = value.as_object()
+        && object.contains_key("status").map_err(to_script_error)?
+    {
+        return parse_full_response(object);
     }
 
     Ok(ScriptMockResponse {
@@ -161,22 +163,16 @@ fn parse_full_response(object: &Object<'_>) -> Result<ScriptMockResponse> {
         ));
     }
 
-    let headers = if object
-        .contains_key("headers")
-        .map_err(to_script_error)?
-    {
-        let headers_obj: Object = object
-            .get("headers")
-            .map_err(|_| MockproxyrsError::Script("response.headers must be an object".to_string()))?;
+    let headers = if object.contains_key("headers").map_err(to_script_error)? {
+        let headers_obj: Object = object.get("headers").map_err(|_| {
+            MockproxyrsError::Script("response.headers must be an object".to_string())
+        })?;
         object_to_string_map(&headers_obj)?
     } else {
         default_headers()
     };
 
-    let body = if object
-        .contains_key("body")
-        .map_err(to_script_error)?
-    {
+    let body = if object.contains_key("body").map_err(to_script_error)? {
         object
             .get("body")
             .map_err(|_| MockproxyrsError::Script("response.body must be a string".to_string()))?
@@ -219,15 +215,14 @@ fn stringify_value<'js>(ctx: rquickjs::Ctx<'js>, value: Value<'js>) -> Result<St
     let json = ctx
         .json_stringify(value)
         .map_err(to_script_error)?
-        .ok_or_else(|| MockproxyrsError::Script("response body cannot be stringified".to_string()))?;
+        .ok_or_else(|| {
+            MockproxyrsError::Script("response body cannot be stringified".to_string())
+        })?;
     json.to_string().map_err(to_script_error)
 }
 
 fn default_headers() -> HashMap<String, String> {
-    HashMap::from([(
-        "content-type".to_string(),
-        DEFAULT_CONTENT_TYPE.to_string(),
-    )])
+    HashMap::from([("content-type".to_string(), DEFAULT_CONTENT_TYPE.to_string())])
 }
 
 #[cfg(test)]
@@ -295,16 +290,23 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status, 200);
-        assert_eq!(response.headers.get("content-type").unwrap(), "application/json;charset=UTF-8");
+        assert_eq!(
+            response.headers.get("content-type").unwrap(),
+            "application/json;charset=UTF-8"
+        );
         assert_eq!(response.body, "hello");
     }
 
     #[tokio::test]
     async fn test_execute_shorthand_object() {
         let engine = ScriptEngine::new().unwrap();
-        let response = execute_script(engine, ctx_with_body(""), r#"return { code: 0 };"#.to_string())
-            .await
-            .unwrap();
+        let response = execute_script(
+            engine,
+            ctx_with_body(""),
+            r#"return { code: 0 };"#.to_string(),
+        )
+        .await
+        .unwrap();
 
         assert_eq!(response.status, 200);
         assert_eq!(response.body, r#"{"code":0}"#);
@@ -357,4 +359,3 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 }
-

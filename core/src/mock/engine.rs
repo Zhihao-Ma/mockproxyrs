@@ -42,8 +42,9 @@ impl ScriptEngine {
         F: for<'js> FnOnce(rquickjs::Ctx<'js>) -> Result<T>,
     {
         let started_at = Instant::now();
-        self.runtime
-            .set_interrupt_handler(Some(Box::new(move || started_at.elapsed() >= SCRIPT_TIMEOUT)));
+        self.runtime.set_interrupt_handler(Some(Box::new(move || {
+            started_at.elapsed() >= SCRIPT_TIMEOUT
+        })));
 
         let result = (|| {
             let context = Context::full(&self.runtime).map_err(to_script_error)?;

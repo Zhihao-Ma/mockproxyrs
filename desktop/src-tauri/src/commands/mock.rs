@@ -377,5 +377,8 @@ pub async fn destroy_channel(state: State<'_, AppState>) -> Result<(), String> {
 /// 校验 JS 脚本语法（仅诊断，不影响保存）
 #[tauri::command]
 pub async fn validate_script(script: String, state: State<'_, AppState>) -> Result<(), String> {
-    state.script_engine.validate(&script).map_err(|e| e.to_string())
+    state
+        .script_engine
+        .validate(&script)
+        .map_err(|e| e.to_string())
 }

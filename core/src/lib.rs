@@ -27,5 +27,5 @@ pub mod repository;
 pub use domain::{MockRule, MockService, ResponseEvent, ServiceStatus};
 pub use error::{MockproxyrsError, Result};
 pub use event::EventEmitter;
-pub use mock::{execute_script, RequestContext, ScriptEngine, ScriptMockResponse};
+pub use mock::{RequestContext, ScriptEngine, ScriptMockResponse, execute_script};
 pub use repository::MockRepository;

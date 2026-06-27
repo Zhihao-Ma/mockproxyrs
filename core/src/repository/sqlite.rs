@@ -7,8 +7,8 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{OptionalExtension, params};
 use tokio::sync::RwLock;
 
-use super::migrations::MIGRATIONS;
 use super::MockRepository;
+use super::migrations::MIGRATIONS;
 use crate::domain::{Method, MockRule, MockService};
 use crate::error::{MockproxyrsError, Result};
 
@@ -193,8 +193,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
-                script: row.get(8)?,
-                delay_ms: row.get(9)?,
+                    script: row.get(8)?,
+                    delay_ms: row.get(9)?,
                 })
             })
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?
@@ -228,8 +228,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
-                script: row.get(8)?,
-                delay_ms: row.get(9)?,
+                    script: row.get(8)?,
+                    delay_ms: row.get(9)?,
                 })
             })
             .optional()
@@ -710,10 +710,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_migration_adds_script_and_delay_to_existing_database() {
-        let path = std::env::temp_dir().join(format!(
-            "mockproxyrs-migration-{}.db",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("mockproxyrs-migration-{}.db", uuid::Uuid::new_v4()));
 
         {
             let conn = rusqlite::Connection::open(&path).unwrap();

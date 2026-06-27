@@ -8,4 +8,4 @@ mod executor;
 
 pub use context::RequestContext;
 pub use engine::ScriptEngine;
-pub use executor::{execute_script, ScriptMockResponse};
+pub use executor::{ScriptMockResponse, execute_script};
