@@ -261,6 +261,8 @@ pub async fn update_rule(
     enabled: bool,
     forward_and_record: bool,
     mock_response: String,
+    script: Option<String>,
+    delay_ms: Option<u64>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let rule = MockRule::new(
@@ -272,8 +274,8 @@ pub async fn update_rule(
         enabled,
         forward_and_record,
         mock_response,
-        None,
-        None,
+        script.filter(|s| !s.is_empty()),
+        delay_ms,
     );
 
     state

@@ -74,6 +74,8 @@ export interface MockRule {
   script?: string | null;
   /** 延迟响应毫秒数 */
   delayMs?: number | null;
+  /** 是否启用高级 Mock（仅前端使用，不持久化） */
+  advancedEnabled?: boolean;
 }
 
 /**

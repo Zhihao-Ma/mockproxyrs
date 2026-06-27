@@ -49,6 +49,7 @@ function addNewRule() {
     mockResponse: "",
     script: null,
     delayMs: null,
+    advancedEnabled: false,
   });
 }
 
@@ -99,16 +100,14 @@ function formatJson(index: number) {
 }
 
 function usesAdvancedMock(rule: MockRule) {
-  return Boolean(rule.script && rule.script.trim());
+  return Boolean(rule.advancedEnabled);
 }
 
 function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   const rule = rules.value[index];
+  rule.advancedEnabled = !!enabled;
   if (enabled && !rule.script) {
     rule.script = 'return { code: 0, data: {} };';
-  }
-  if (!enabled) {
-    rule.script = null;
   }
   saveRule(index);
 }
@@ -164,7 +163,10 @@ async function loadService(id: string) {
     });
     isRunning.value = service.running;
     const ruleList = await listRules(id);
-    rules.value = ruleList;
+    rules.value = ruleList.map(r => ({
+      ...r,
+      advancedEnabled: Boolean(r.script && r.script.trim()),
+    }));
   }
 }
 
@@ -333,7 +335,7 @@ watch(
                   />
                 </div>
               </div>
-              <div class="form-group">
+              <div v-if="!usesAdvancedMock(item)" class="form-group">
                 <label class="form-label">Mock 响应 (JSON)</label>
                 <el-input
                   v-model.trim="item.mockResponse"
