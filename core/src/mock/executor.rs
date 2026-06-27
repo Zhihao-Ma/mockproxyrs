@@ -229,3 +229,132 @@ fn default_headers() -> HashMap<String, String> {
         DEFAULT_CONTENT_TYPE.to_string(),
     )])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ctx_with_body(body: &str) -> RequestContext {
+        RequestContext::new(
+            "POST".to_string(),
+            "/api/users?id=42".to_string(),
+            HashMap::from([("content-type".to_string(), "application/json".to_string())]),
+            body.to_string(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_execute_full_response() {
+        let engine = ScriptEngine::new().unwrap();
+        let response = execute_script(
+            engine,
+            ctx_with_body("{}"),
+            r#"return { status: 201, headers: { "x-test": "ok" }, body: "created" };"#.to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status, 201);
+        assert_eq!(response.headers.get("x-test"), Some(&"ok".to_string()));
+        assert_eq!(response.body, "created");
+    }
+
+    #[tokio::test]
+    async fn test_execute_reads_request_context() {
+        let engine = ScriptEngine::new().unwrap();
+        let response = execute_script(
+            engine,
+            ctx_with_body(r#"{"name":"alice"}"#),
+            r#"
+            const data = JSON.parse(request.body);
+            return {
+                method: request.method,
+                path: request.path,
+                id: request.query.id,
+                contentType: request.headers["content-type"],
+                name: data.name
+            };
+            "#
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.status, 200);
+        assert!(response.body.contains(r#""method":"POST""#));
+        assert!(response.body.contains(r#""path":"/api/users""#));
+        assert!(response.body.contains(r#""id":"42""#));
+        assert!(response.body.contains(r#""name":"alice""#));
+    }
+
+    #[tokio::test]
+    async fn test_execute_shorthand_string() {
+        let engine = ScriptEngine::new().unwrap();
+        let response = execute_script(engine, ctx_with_body(""), r#"return "hello";"#.to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.headers.get("content-type").unwrap(), "application/json;charset=UTF-8");
+        assert_eq!(response.body, "hello");
+    }
+
+    #[tokio::test]
+    async fn test_execute_shorthand_object() {
+        let engine = ScriptEngine::new().unwrap();
+        let response = execute_script(engine, ctx_with_body(""), r#"return { code: 0 };"#.to_string())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status, 200);
+        assert_eq!(response.body, r#"{"code":0}"#);
+    }
+
+    #[tokio::test]
+    async fn test_execute_rejects_undefined() {
+        let engine = ScriptEngine::new().unwrap();
+        let result = execute_script(engine, ctx_with_body(""), "const x = 1;".to_string()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_rejects_bad_status() {
+        let engine = ScriptEngine::new().unwrap();
+        let result = execute_script(
+            engine,
+            ctx_with_body(""),
+            r#"return { status: 99, body: "bad" };"#.to_string(),
+        )
+        .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_console_methods_do_not_fail() {
+        let engine = ScriptEngine::new().unwrap();
+        let response = execute_script(
+            engine,
+            ctx_with_body(""),
+            r#"
+            console.log("hello", { code: 0 });
+            console.error("warn", 1);
+            return "ok";
+            "#
+            .to_string(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.body, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_execute_times_out_infinite_loop() {
+        let engine = ScriptEngine::new().unwrap();
+        let started = std::time::Instant::now();
+        let result = execute_script(engine, ctx_with_body(""), "while (true) {}".to_string()).await;
+        assert!(result.is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+}
+
