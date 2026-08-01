@@ -1,6 +1,6 @@
 use crate::error::{MockproxyrsError, Result};
 use crate::mock::context::RequestContext;
-use crate::mock::engine::{to_detailed_script_error, to_script_error, ScriptEngine};
+use crate::mock::engine::{ScriptEngine, to_detailed_script_error, to_script_error};
 use rquickjs::{Function, Object, Value, prelude::Rest};
 use std::collections::HashMap;
 
