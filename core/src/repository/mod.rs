@@ -7,6 +7,7 @@
 //! - [`MockRepository`] - 数据仓库 trait，定义服务与规则的 CRUD 接口
 //! - [`SqliteRepository`] - SQLite 实现，支持数据持久化
 
+mod migrations;
 mod sqlite;
 
 use async_trait::async_trait;

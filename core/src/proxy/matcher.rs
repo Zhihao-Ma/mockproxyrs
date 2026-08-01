@@ -198,6 +198,8 @@ mod tests {
             enabled,
             false,
             "{}".to_string(),
+            None,
+            None,
         )
     }
 

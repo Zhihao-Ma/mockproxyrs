@@ -2,8 +2,12 @@
 import { reactive, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
-import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService } from "@/api";
+import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
 import type { MockRule, Method } from "@/types";
+import CodeEditor from "@/components/CodeEditor.vue";
+import * as prettier from "prettier/standalone";
+import * as parserBabel from "prettier/plugins/babel";
+import * as estree from "prettier/plugins/estree";
 
 const route = useRoute();
 
@@ -47,6 +51,9 @@ function addNewRule() {
     enabled: false,
     forwardAndRecord: false,
     mockResponse: "",
+    script: null,
+    delayMs: null,
+    advancedEnabled: false,
   });
 }
 
@@ -64,6 +71,8 @@ async function saveRule(index: number) {
       enabled: rule.enabled,
       forwardAndRecord: rule.forwardAndRecord,
       mockResponse: rule.mockResponse,
+      script: rule.script || null,
+      delayMs: rule.delayMs ?? null,
     });
   } else {
     const id = await addRule({
@@ -74,22 +83,48 @@ async function saveRule(index: number) {
       enabled: rule.enabled,
       forwardAndRecord: rule.forwardAndRecord,
       mockResponse: rule.mockResponse,
+      script: rule.script || null,
+      delayMs: rule.delayMs ?? null,
     });
     rule.id = id;
   }
 }
 
-function formatJson(index: number) {
+function usesAdvancedMock(rule: MockRule) {
+  return Boolean(rule.advancedEnabled);
+}
+
+function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   const rule = rules.value[index];
-  if (rule.mockResponse) {
-    try {
-      const jsonObj = JSON.parse(rule.mockResponse);
-      rule.mockResponse = JSON.stringify(jsonObj, null, 4);
-      saveRule(index);
-    } catch (e) {
-      // ignore parse error
-    }
+  rule.advancedEnabled = !!enabled;
+  if (enabled && !rule.script) {
+    rule.script = 'return { code: 0, data: {} };';
   }
+  saveRule(index);
+}
+
+/** 格式化 JSON：非法 JSON 时抛错交由编辑器展示 */
+function formatJsonString(source: string): Promise<string> {
+  return Promise.resolve(JSON.stringify(JSON.parse(source), null, 4));
+}
+
+/** 格式化 JS 脚本：解析失败时回退原文本，保证不破坏内容 */
+function formatScriptString(source: string): Promise<string> {
+  return prettier
+    .format(source, {
+      parser: "babel",
+      plugins: [parserBabel, estree],
+      semi: false,
+      singleQuote: false,
+      printWidth: 80,
+      tabWidth: 2,
+    })
+    .catch(() => source);
+}
+
+/** 校验 JS 脚本语法 */
+function validateScriptString(source: string): Promise<void> {
+  return validateScript(source);
 }
 
 async function handleDeleteRule(index: number) {
@@ -132,7 +167,10 @@ async function loadService(id: string) {
     });
     isRunning.value = service.running;
     const ruleList = await listRules(id);
-    rules.value = ruleList;
+    rules.value = ruleList.map(r => ({
+      ...r,
+      advancedEnabled: Boolean(r.script && r.script.trim()),
+    }));
   }
 }
 
@@ -289,14 +327,59 @@ watch(
                   </el-input>
                 </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Mock 响应 (JSON)</label>
-                <el-input
-                  v-model.trim="item.mockResponse"
-                  type="textarea"
+              <div class="form-row">
+                <div class="form-group form-group-delay">
+                  <label class="form-label">延迟(ms)</label>
+                  <el-input-number
+                    v-model="item.delayMs"
+                    :min="0"
+                    :step="100"
+                    controls-position="right"
+                    @change="saveRule(index)"
+                  />
+                </div>
+              </div>
+              <div v-if="!usesAdvancedMock(item)" class="form-group">
+                <CodeEditor
+                  :model-value="item.mockResponse"
+                  language="json"
+                  label="Mock 响应 (JSON)"
                   :rows="6"
+                  :preview-lines="6"
                   placeholder='{"code": 200, "data": {}}'
-                  @blur="formatJson(index)"
+                  :formatter="formatJsonString"
+                  format-on-close
+                  dialog-title="编辑 Mock 响应"
+                  @update:model-value="(val: string) => { item.mockResponse = val }"
+                  @blur="saveRule(index)"
+                  @save="saveRule(index)"
+                />
+              </div>
+              <div class="form-group">
+                <div class="advanced-header">
+                  <label class="form-label">高级 Mock（JS 脚本）</label>
+                  <div class="advanced-actions">
+                    <el-switch
+                      :model-value="usesAdvancedMock(item)"
+                      @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
+                    />
+                  </div>
+                </div>
+                <CodeEditor
+                  v-if="usesAdvancedMock(item)"
+                  :model-value="item.script || ''"
+                  language="javascript"
+                  :rows="8"
+                  :preview-lines="8"
+                  placeholder="return { code: 0, data: request.query };"
+                  :formatter="formatScriptString"
+                  :validator="validateScriptString"
+                  validate-text="校验语法"
+                  format-text="格式化"
+                  dialog-title="编辑高级 Mock 脚本"
+                  @update:model-value="(val: string) => { item.script = val }"
+                  @blur="saveRule(index)"
+                  @save="saveRule(index)"
                 />
               </div>
             </div>
@@ -533,6 +616,24 @@ watch(
 
 .highlight-flash {
   animation: highlightFlash 0.8s ease;
+}
+
+.form-group-delay {
+  width: 160px;
+  flex-shrink: 0;
+}
+
+.advanced-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.advanced-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 @keyframes highlightFlash {

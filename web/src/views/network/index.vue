@@ -48,16 +48,18 @@ async function toggleRecording() {
 }
 
 async function applyRule(row: ResponseEvent) {
-  console.log(row);
   if (!row.matchedRuleId) {
-  // 没有匹配的规则直接新增
+    // 没有匹配的规则直接新增
     const path = row.url.split('?')[0];
-    await addRule({
+    const ruleId = await addRule({
       serviceId: row.serviceId,
       urlPattern: path,
       mockResponse: row.responseBody,
       enabled: true,
-    })
+    });
+    // 新建规则后，把规则 id 回填到这条日志记录上。
+    // row 是 logData 中对应项的引用（slice/filter 共享元素引用），直接赋值即可同步更新。
+    row.matchedRuleId = ruleId;
   } else {
     await updateRule({
       id: row.matchedRuleId,
@@ -70,7 +72,6 @@ async function applyRule(row: ResponseEvent) {
       mockResponse: row.responseBody,
     });
   }
-
 }
 
 function jumpToRule(row: ResponseEvent) {

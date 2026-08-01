@@ -17,6 +17,7 @@ mod state;
 
 use commands::*;
 use log::info;
+use mockproxyrs_core::mock::ScriptEngine;
 use mockproxyrs_core::repository::SqliteRepository;
 use state::AppState;
 use std::time::Duration;
@@ -70,7 +71,8 @@ pub fn run() {
     info!("Database path: {:?}", db_path);
 
     let repository = SqliteRepository::new(&db_path).expect("Failed to initialize database");
-    let state = AppState::new(repository);
+    let script_engine = ScriptEngine::new().expect("Failed to initialize script engine");
+    let state = AppState::new(repository, script_engine);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -94,6 +96,8 @@ pub fn run() {
             // 事件通道
             create_channel,
             destroy_channel,
+            // 脚本校验
+            validate_script,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

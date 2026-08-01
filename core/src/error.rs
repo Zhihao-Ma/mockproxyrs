@@ -75,6 +75,10 @@ pub enum MockproxyrsError {
     #[error("Channel error: {0}")]
     Channel(String),
 
+    /// JS 脚本错误（语法、运行时、超时、返回值校验等）
+    #[error("Script error: {0}")]
+    Script(String),
+
     /// 未知错误
     #[error("Unknown error: {0}")]
     Unknown(String),

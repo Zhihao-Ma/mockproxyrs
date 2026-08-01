@@ -8,6 +8,7 @@ use rusqlite::{OptionalExtension, params};
 use tokio::sync::RwLock;
 
 use super::MockRepository;
+use super::migrations::MIGRATIONS;
 use crate::domain::{Method, MockRule, MockService};
 use crate::error::{MockproxyrsError, Result};
 
@@ -27,10 +28,12 @@ impl SqliteRepository {
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
 
         // 初始化表结构
-        let conn = pool
+        let mut conn = pool
             .get()
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
-        Self::init_tables(&conn)?;
+        MIGRATIONS
+            .to_latest(&mut conn)
+            .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
 
         Ok(Self {
             pool,
@@ -45,45 +48,17 @@ impl SqliteRepository {
             .build(manager)
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
 
-        let conn = pool
+        let mut conn = pool
             .get()
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
-        Self::init_tables(&conn)?;
+        MIGRATIONS
+            .to_latest(&mut conn)
+            .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
 
         Ok(Self {
             pool,
             write_lock: Arc::new(RwLock::new(())),
         })
-    }
-
-    fn init_tables(conn: &rusqlite::Connection) -> Result<()> {
-        conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS mock_service (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                listen_addr TEXT NOT NULL,
-                target_url TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS mock_rule (
-                id TEXT PRIMARY KEY,
-                service_id TEXT NOT NULL,
-                url_pattern TEXT NOT NULL,
-                is_regex INTEGER NOT NULL DEFAULT 0,
-                method TEXT NOT NULL DEFAULT 'ALL',
-                enabled INTEGER NOT NULL DEFAULT 1,
-                forward_and_record INTEGER NOT NULL DEFAULT 0,
-                mock_response TEXT,
-                FOREIGN KEY (service_id) REFERENCES mock_service(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_mock_rule_service_id ON mock_rule(service_id);
-            "#,
-        )
-        .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
-
-        Ok(())
     }
 
     fn get_conn(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>> {
@@ -198,7 +173,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
                  FROM mock_rule WHERE service_id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -218,6 +193,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
+                    script: row.get(8)?,
+                    delay_ms: row.get(9)?,
                 })
             })
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?
@@ -231,7 +208,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
                  FROM mock_rule WHERE id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -251,6 +228,8 @@ impl MockRepository for SqliteRepository {
                     enabled: enabled != 0,
                     forward_and_record: forward_and_record != 0,
                     mock_response: row.get(7)?,
+                    script: row.get(8)?,
+                    delay_ms: row.get(9)?,
                 })
             })
             .optional()
@@ -265,15 +244,17 @@ impl MockRepository for SqliteRepository {
 
         let method = Self::method_to_string(&rule.method);
         conn.execute(
-            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                ON CONFLICT(id) DO UPDATE SET
                    url_pattern = excluded.url_pattern,
                    is_regex = excluded.is_regex,
                    method = excluded.method,
                    enabled = excluded.enabled,
                    forward_and_record = excluded.forward_and_record,
-                   mock_response = excluded.mock_response"#,
+                   mock_response = excluded.mock_response,
+                   script = excluded.script,
+                   delay_ms = excluded.delay_ms"#,
             params![
                 rule.id,
                 rule.service_id,
@@ -282,7 +263,9 @@ impl MockRepository for SqliteRepository {
                 method,
                 rule.enabled as i32,
                 rule.forward_and_record as i32,
-                rule.mock_response
+                rule.mock_response,
+                rule.script.as_deref(),
+                rule.delay_ms.map(|v| v as i64),
             ],
         )
         .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -369,6 +352,8 @@ mod tests {
             true,
             false,
             r#"{"code": 200}"#.to_string(),
+            None,
+            None,
         );
 
         // Create
@@ -438,6 +423,8 @@ mod tests {
             true,
             false,
             r#"{"code": 200}"#.to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -451,6 +438,8 @@ mod tests {
             false,
             true,
             r#"{"code": 201}"#.to_string(),
+            None,
+            None,
         );
         repo.save_rule(&updated).await.unwrap();
 
@@ -537,6 +526,8 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
         }
@@ -579,6 +570,8 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
 
@@ -609,6 +602,8 @@ mod tests {
             true,
             false,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule_enabled).await.unwrap();
 
@@ -621,6 +616,8 @@ mod tests {
             false,
             false,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule_disabled).await.unwrap();
 
@@ -652,6 +649,8 @@ mod tests {
             true,
             true,
             "{}".to_string(),
+            None,
+            None,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -699,11 +698,76 @@ mod tests {
                 true,
                 false,
                 "{}".to_string(),
+                None,
+                None,
             );
             repo.save_rule(&rule).await.unwrap();
         }
 
         let rules = repo.list_rules("svc-1").await.unwrap();
         assert_eq!(rules.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_migration_adds_script_and_delay_to_existing_database() {
+        let path =
+            std::env::temp_dir().join(format!("mockproxyrs-migration-{}.db", uuid::Uuid::new_v4()));
+
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE mock_service (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    listen_addr TEXT NOT NULL,
+                    target_url TEXT NOT NULL
+                );
+
+                CREATE TABLE mock_rule (
+                    id TEXT PRIMARY KEY,
+                    service_id TEXT NOT NULL,
+                    url_pattern TEXT NOT NULL,
+                    is_regex INTEGER NOT NULL DEFAULT 0,
+                    method TEXT NOT NULL DEFAULT 'ALL',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    forward_and_record INTEGER NOT NULL DEFAULT 0,
+                    mock_response TEXT,
+                    FOREIGN KEY (service_id) REFERENCES mock_service(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO mock_service (id, name, listen_addr, target_url)
+                VALUES ('svc-1', 'Test', '127.0.0.1:8080', 'https://example.com');
+
+                INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response)
+                VALUES ('rule-1', 'svc-1', '/api/test', 0, 'GET', 1, 0, '{"code":200}');
+                "#,
+            )
+            .unwrap();
+        }
+
+        let repo = SqliteRepository::new(&path).unwrap();
+        let rule = repo.get_rule("rule-1").await.unwrap().unwrap();
+        assert_eq!(rule.script, None);
+        assert_eq!(rule.delay_ms, None);
+
+        let updated = MockRule::new(
+            "rule-1".to_string(),
+            "svc-1".to_string(),
+            "/api/test".to_string(),
+            false,
+            Method::Get,
+            true,
+            false,
+            "{}".to_string(),
+            Some("return { code: 0 };".to_string()),
+            Some(250),
+        );
+        repo.save_rule(&updated).await.unwrap();
+        let found = repo.get_rule("rule-1").await.unwrap().unwrap();
+        assert_eq!(found.script, Some("return { code: 0 };".to_string()));
+        assert_eq!(found.delay_ms, Some(250));
+
+        let _ = std::fs::remove_file(path);
     }
 }
