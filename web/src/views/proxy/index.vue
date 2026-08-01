@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
 import type { MockRule, Method } from "@/types";
+import CodeEditor from "@/components/CodeEditor.vue";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
@@ -28,8 +29,6 @@ const form = reactive({
 
 const rules = ref<MockRule[]>([]);
 const isRunning = ref(false);
-/** 脚本校验错误，key 为规则在 rules 中的索引 */
-const scriptErrors = ref<Record<number, string>>({});
 
 async function handleStart() {
   await updateService({...form})
@@ -91,19 +90,6 @@ async function saveRule(index: number) {
   }
 }
 
-function formatJson(index: number) {
-  const rule = rules.value[index];
-  if (rule.mockResponse) {
-    try {
-      const jsonObj = JSON.parse(rule.mockResponse);
-      rule.mockResponse = JSON.stringify(jsonObj, null, 4);
-      saveRule(index);
-    } catch (e) {
-      // ignore parse error
-    }
-  }
-}
-
 function usesAdvancedMock(rule: MockRule) {
   return Boolean(rule.advancedEnabled);
 }
@@ -117,32 +103,28 @@ function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   saveRule(index);
 }
 
-async function handleValidateScript(index: number) {
-  const rule = rules.value[index];
-  const script = rule.script || "";
-  try {
-    await validateScript(script);
-    rule.script = await formatScript(script);
-    delete scriptErrors.value[index];
-    saveRule(index);
-  } catch (error) {
-    scriptErrors.value[index] = String(error);
-  }
+/** 格式化 JSON：非法 JSON 时抛错交由编辑器展示 */
+function formatJsonString(source: string): Promise<string> {
+  return Promise.resolve(JSON.stringify(JSON.parse(source), null, 4));
 }
 
-async function formatScript(source: string): Promise<string> {
-  try {
-    return await prettier.format(source, {
+/** 格式化 JS 脚本：解析失败时回退原文本，保证不破坏内容 */
+function formatScriptString(source: string): Promise<string> {
+  return prettier
+    .format(source, {
       parser: "babel",
       plugins: [parserBabel, estree],
       semi: false,
       singleQuote: false,
       printWidth: 80,
       tabWidth: 2,
-    });
-  } catch {
-    return source;
-  }
+    })
+    .catch(() => source);
+}
+
+/** 校验 JS 脚本语法 */
+function validateScriptString(source: string): Promise<void> {
+  return validateScript(source);
 }
 
 async function handleDeleteRule(index: number) {
@@ -358,13 +340,19 @@ watch(
                 </div>
               </div>
               <div v-if="!usesAdvancedMock(item)" class="form-group">
-                <label class="form-label">Mock 响应 (JSON)</label>
-                <el-input
-                  v-model.trim="item.mockResponse"
-                  type="textarea"
+                <CodeEditor
+                  :model-value="item.mockResponse"
+                  language="json"
+                  label="Mock 响应 (JSON)"
                   :rows="6"
+                  :preview-lines="6"
                   placeholder='{"code": 200, "data": {}}'
-                  @blur="formatJson(index)"
+                  :formatter="formatJsonString"
+                  format-on-close
+                  dialog-title="编辑 Mock 响应"
+                  @update:model-value="(val: string) => { item.mockResponse = val }"
+                  @blur="saveRule(index)"
+                  @save="saveRule(index)"
                 />
               </div>
               <div class="form-group">
@@ -375,26 +363,24 @@ watch(
                       :model-value="usesAdvancedMock(item)"
                       @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
                     />
-                    <el-button
-                      size="small"
-                      :disabled="!item.script"
-                      @click="handleValidateScript(index)"
-                    >
-                      校验语法
-                    </el-button>
                   </div>
                 </div>
-                <el-input
+                <CodeEditor
                   v-if="usesAdvancedMock(item)"
-                  v-model="item.script"
-                  type="textarea"
+                  :model-value="item.script || ''"
+                  language="javascript"
                   :rows="8"
+                  :preview-lines="8"
                   placeholder="return { code: 0, data: request.query };"
+                  :formatter="formatScriptString"
+                  :validator="validateScriptString"
+                  validate-text="校验语法"
+                  format-text="格式化"
+                  dialog-title="编辑高级 Mock 脚本"
+                  @update:model-value="(val: string) => { item.script = val }"
                   @blur="saveRule(index)"
+                  @save="saveRule(index)"
                 />
-                <div v-if="scriptErrors[index]" class="script-error">
-                  {{ scriptErrors[index] }}
-                </div>
               </div>
             </div>
           </div>
@@ -626,20 +612,6 @@ watch(
 
 .regex-toggle.active:hover {
   box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-}
-
-.script-error {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: #fef0f0;
-  border: 1px solid #fde2e2;
-  border-radius: 6px;
-  color: #f56c6c;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  font-family: "SF Mono", Monaco, Consolas, monospace;
 }
 
 .highlight-flash {

@@ -8,6 +8,8 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    CodeEditor: typeof import('./components/CodeEditor.vue')['default']
+    CodeEditorPane: typeof import('./components/CodeEditorPane.vue')['default']
     Content: typeof import('./components/Content.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElButton: typeof import('element-plus/es')['ElButton']
