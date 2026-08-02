@@ -42,6 +42,8 @@ const props = withDefaults(
     dialogTitle?: string;
     /** 内联预览的空状态提示 */
     emptyText?: string;
+    /** 标题旁帮助按钮的回调；传入则显示问号 icon，点击触发 */
+    help?: () => void;
   }>(),
   {
     language: "json",
@@ -56,6 +58,7 @@ const props = withDefaults(
     formatText: "格式化",
     dialogTitle: "编辑",
     emptyText: "点击编辑",
+    help: undefined,
   }
 );
 
@@ -189,13 +192,23 @@ defineExpose({ format, validate, markSaved });
 
     <el-dialog
       v-model="dialogVisible"
-      :title="dialogTitle || label"
       width="80%"
       class="code-editor__dialog"
       append-to-body
       destroy-on-close
       @closed="onDialogClosed"
     >
+      <template #header>
+        <div class="code-editor__dialog-title">
+          <span class="el-dialog__title">{{ dialogTitle || label }}</span>
+          <span
+            v-if="help"
+            class="help-icon"
+            title="使用说明"
+            @click="help"
+          >?</span>
+        </div>
+      </template>
       <div class="code-editor__dialog-toolbar">
         <el-button
           v-if="validator !== undefined"
@@ -364,6 +377,34 @@ defineExpose({ format, validate, markSaved });
 .code-editor__dialog .el-dialog__header {
   flex-shrink: 0;
   margin-right: 0;
+}
+
+.code-editor__dialog-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.code-editor__dialog .help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #86868b;
+  border: 1px solid #d2d2d7;
+  border-radius: 50%;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.code-editor__dialog .help-icon:hover {
+  color: #0071e3;
+  border-color: #0071e3;
 }
 
 .code-editor__dialog .el-dialog__body {

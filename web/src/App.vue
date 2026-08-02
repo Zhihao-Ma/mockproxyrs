@@ -163,4 +163,39 @@ html,
   font-weight: 600 !important;
   color: #1d1d1f !important;
 }
+
+/* 高级 Mock 使用说明弹窗：固定尺寸，滚动条在内容区内部，定位对齐编辑器弹窗 */
+.script-help-dialog {
+  width: 640px !important;
+  max-width: calc(100vw - 32px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  max-height: 90vh !important;
+  /* 对齐 ElDialog 的定位：水平 auto 居中、距顶 5vh，而非默认 transform 居中 */
+  margin: 5vh auto 0 !important;
+  top: 0 !important;
+  transform: none !important;
+  padding-bottom: 0 !important;
+}
+
+.script-help-dialog .el-message-box__header {
+  flex-shrink: 0;
+}
+
+.script-help-dialog .el-message-box__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.script-help-dialog .el-message-box__message {
+  /* 给明确高度上限，确保滚动条在弹窗内部而非撑破外层 */
+  max-height: calc(90vh - 160px);
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.script-help-dialog .el-message-box__action {
+  flex-shrink: 0;
+}
 </style>
