@@ -103,6 +103,65 @@ function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   saveRule(index);
 }
 
+/** 高级 Mock 脚本使用说明 */
+function showScriptHelp() {
+  const html = `
+    <div style="line-height:1.7;font-size:13px;text-align:left;">
+      <p style="margin:0 0 10px;">脚本以 <b>普通函数体</b> 形式执行，通过 <code>return</code> 返回 Mock 响应。</p>
+
+      <p style="margin:0 0 6px;"><b>可用变量</b></p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:12px;font-size:12px;">
+        <thead>
+          <tr style="background:#f5f5f7;">
+            <th style="padding:6px 8px;border:1px solid #e0e0e0;text-align:left;">变量</th>
+            <th style="padding:6px 8px;border:1px solid #e0e0e0;text-align:left;">类型</th>
+            <th style="padding:6px 8px;border:1px solid #e0e0e0;text-align:left;">说明</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.method</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">string</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">HTTP 方法，如 "GET"</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.url</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">string</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">完整请求 URL（含 query）</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.path</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">string</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">路径部分（不含 query）</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.query</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">object</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">query 参数键值对</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.headers</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">object</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">请求头键值对</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>request.body</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">string</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">请求体原始字符串，可用 <code>JSON.parse</code> 解析</td></tr>
+          <tr><td style="padding:6px 8px;border:1px solid #e0e0e0;"><code>console.log/error</code></td><td style="padding:6px 8px;border:1px solid #e0e0e0;">function</td><td style="padding:6px 8px;border:1px solid #e0e0e0;">输出日志到应用日志文件</td></tr>
+        </tbody>
+      </table>
+
+      <p style="margin:0 0 6px;"><b>返回值规则</b></p>
+      <ul style="margin:0 0 12px;padding-left:20px;">
+        <li>返回 <b>字符串</b>：直接作为响应体，状态码 200</li>
+        <li>返回 <b>普通对象</b>：自动 JSON 序列化为响应体，状态码 200</li>
+        <li>返回含 <code>status</code> 字段的对象：按完整响应解析
+          <ul style="margin:4px 0;padding-left:20px;">
+            <li><code>status</code>：状态码（100–599）</li>
+            <li><code>headers</code>：可选，响应头对象</li>
+            <li><code>body</code>：可选，响应体字符串</li>
+          </ul>
+        </li>
+        <li>未 <code>return</code> 或返回 <code>undefined</code>：报错</li>
+      </ul>
+
+      <p style="margin:0 0 6px;"><b>示例</b></p>
+      <pre style="background:#1d1d1f;color:#f5f5f7;padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap;margin:0;">// 读取请求体并动态返回
+const data = JSON.parse(request.body);
+return {
+  status: 201,
+  headers: { "x-mock": "1" },
+  body: JSON.stringify({ id: 1, name: data.name })
+};</pre>
+    </div>
+  `;
+  ElMessageBox.alert(html, "高级 Mock 脚本使用说明", {
+    dangerouslyUseHTMLString: true,
+    confirmButtonText: "知道了",
+    customClass: "script-help-dialog",
+    center: true,
+    closeOnClickModal: true,
+  });
+}
+
 /** 格式化 JSON：非法 JSON 时抛错交由编辑器展示 */
 function formatJsonString(source: string): Promise<string> {
   return Promise.resolve(JSON.stringify(JSON.parse(source), null, 4));
@@ -357,7 +416,14 @@ watch(
               </div>
               <div class="form-group">
                 <div class="advanced-header">
-                  <label class="form-label">高级 Mock（JS 脚本）</label>
+                  <div class="advanced-title">
+                    <label class="form-label">高级 Mock（JS 脚本）</label>
+                    <span
+                      class="help-icon"
+                      title="使用说明"
+                      @click="showScriptHelp"
+                    >?</span>
+                  </div>
                   <div class="advanced-actions">
                     <el-switch
                       :model-value="usesAdvancedMock(item)"
@@ -377,6 +443,7 @@ watch(
                   validate-text="校验语法"
                   format-text="格式化"
                   dialog-title="编辑高级 Mock 脚本"
+                  :help="showScriptHelp"
                   @update:model-value="(val: string) => { item.script = val }"
                   @blur="saveRule(index)"
                   @save="saveRule(index)"
@@ -628,6 +695,34 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.advanced-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.help-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #86868b;
+  border: 1px solid #d2d2d7;
+  border-radius: 50%;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.help-icon:hover {
+  color: #0071e3;
+  border-color: #0071e3;
 }
 
 .advanced-actions {
