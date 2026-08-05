@@ -8,6 +8,7 @@ import CodeEditor from "@/components/CodeEditor.vue";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
+import { ru } from "element-plus/lib/locale/index.js";
 
 const route = useRoute();
 
@@ -53,7 +54,7 @@ function addNewRule() {
     mockResponse: "",
     script: null,
     delayMs: null,
-    advancedEnabled: false,
+    useScript: false,
   });
 }
 
@@ -73,6 +74,7 @@ async function saveRule(index: number) {
       mockResponse: rule.mockResponse,
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
+      useScript: rule.useScript,
     });
   } else {
     const id = await addRule({
@@ -85,18 +87,19 @@ async function saveRule(index: number) {
       mockResponse: rule.mockResponse,
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
+      useScript: rule.useScript,
     });
     rule.id = id;
   }
 }
 
 function usesAdvancedMock(rule: MockRule) {
-  return Boolean(rule.advancedEnabled);
+  return Boolean(rule.useScript);
 }
 
 function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   const rule = rules.value[index];
-  rule.advancedEnabled = !!enabled;
+  rule.useScript = !!enabled;
   if (enabled && !rule.script) {
     rule.script = 'return { code: 0, data: {} };';
   }
@@ -228,7 +231,7 @@ async function loadService(id: string) {
     const ruleList = await listRules(id);
     rules.value = ruleList.map(r => ({
       ...r,
-      advancedEnabled: Boolean(r.script && r.script.trim()),
+      useScript: r.useScript,
     }));
   }
 }

@@ -265,6 +265,7 @@ async fn handle_request(
     let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
     let mock_response = matched_rule.map(|r| r.mock_response.clone());
+    let use_script = matched_rule.is_some_and(|r| r.use_script);
     let script = matched_rule
         .and_then(|r| r.script.clone())
         .filter(|s| !s.trim().is_empty());
@@ -282,7 +283,7 @@ async fn handle_request(
     let mut mock_body_for_event = if is_mock { mock_response.clone() } else { None };
 
     // 决定处理方式
-    let (response, response_body) = if is_mock && script.is_some() {
+    let (response, response_body) = if is_mock && use_script {
         #[allow(clippy::unnecessary_unwrap)]
         let script = script.expect("script checked above");
         let (parts, body) = req.into_parts();

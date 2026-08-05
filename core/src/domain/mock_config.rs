@@ -137,6 +137,9 @@ pub struct MockRule {
     /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
     #[serde(default)]
     pub delay_ms: Option<u64>,
+    /// 是否启用脚本执行（true=执行 script 生成响应，false=使用静态 mock_response）
+    #[serde(default)]
+    pub use_script: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -163,6 +166,9 @@ pub struct MockRuleDTO {
     /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
     #[serde(default)]
     pub delay_ms: Option<u64>,
+    /// 是否启用脚本执行
+    #[serde(default)]
+    pub use_script: Option<bool>,
 }
 
 impl MockRule {
@@ -177,6 +183,7 @@ impl MockRule {
         mock_response: String,
         script: Option<String>,
         delay_ms: Option<u64>,
+        use_script: bool,
     ) -> Self {
         Self {
             id,
@@ -189,6 +196,7 @@ impl MockRule {
             mock_response,
             script,
             delay_ms,
+            use_script,
         }
     }
 }
@@ -385,6 +393,7 @@ mod tests {
             r#"{"code": 200}"#.to_string(),
             None,
             None,
+            false,
         );
 
         assert_eq!(rule.id, "rule-1");
@@ -520,6 +529,7 @@ mod tests {
             r#"{"code": 201}"#.to_string(),
             None,
             None,
+            false,
         );
 
         let json = serde_json::to_string(&rule).unwrap();

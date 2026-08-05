@@ -200,6 +200,7 @@ mod tests {
             "{}".to_string(),
             None,
             None,
+            false,
         )
     }
 
