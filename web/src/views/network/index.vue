@@ -56,6 +56,7 @@ async function applyRule(row: ResponseEvent) {
       urlPattern: path,
       mockResponse: row.responseBody,
       enabled: true,
+      useScript: false,
     });
     // 新建规则后，把规则 id 回填到这条日志记录上。
     // row 是 logData 中对应项的引用（slice/filter 共享元素引用），直接赋值即可同步更新。
@@ -70,6 +71,7 @@ async function applyRule(row: ResponseEvent) {
       enabled: true,
       forwardAndRecord: true,
       mockResponse: row.responseBody,
+      useScript: false,
     });
   }
 }

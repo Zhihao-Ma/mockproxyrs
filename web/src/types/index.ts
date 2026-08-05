@@ -74,8 +74,8 @@ export interface MockRule {
   script?: string | null;
   /** 延迟响应毫秒数 */
   delayMs?: number | null;
-  /** 是否启用高级 Mock（仅前端使用，不持久化） */
-  advancedEnabled?: boolean;
+  /** 是否启用脚本执行（true=执行脚本，false=使用静态 mockResponse） */
+  useScript: boolean;
 }
 
 /**
@@ -147,6 +147,7 @@ export interface CreateRuleParams {
   mockResponse: string;
   script?: string | null;
   delayMs?: number | null;
+  useScript?: boolean;
 }
 
 /**
@@ -163,4 +164,5 @@ export interface UpdateRuleParams {
   mockResponse: string;
   script?: string | null;
   delayMs?: number | null;
+  useScript: boolean;
 }

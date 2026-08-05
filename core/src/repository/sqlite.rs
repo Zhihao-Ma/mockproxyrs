@@ -173,7 +173,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script
                  FROM mock_rule WHERE service_id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -184,6 +184,7 @@ impl MockRepository for SqliteRepository {
                 let is_regex: i32 = row.get(3)?;
                 let enabled: i32 = row.get(5)?;
                 let forward_and_record: i32 = row.get(6)?;
+                let use_script: i32 = row.get(10)?;
                 Ok(MockRule {
                     id: row.get(0)?,
                     service_id: row.get(1)?,
@@ -195,6 +196,7 @@ impl MockRepository for SqliteRepository {
                     mock_response: row.get(7)?,
                     script: row.get(8)?,
                     delay_ms: row.get(9)?,
+                    use_script: use_script != 0,
                 })
             })
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?
@@ -208,7 +210,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script
                  FROM mock_rule WHERE id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -219,6 +221,7 @@ impl MockRepository for SqliteRepository {
                 let is_regex: i32 = row.get(3)?;
                 let enabled: i32 = row.get(5)?;
                 let forward_and_record: i32 = row.get(6)?;
+                let use_script: i32 = row.get(10)?;
                 Ok(MockRule {
                     id: row.get(0)?,
                     service_id: row.get(1)?,
@@ -230,6 +233,7 @@ impl MockRepository for SqliteRepository {
                     mock_response: row.get(7)?,
                     script: row.get(8)?,
                     delay_ms: row.get(9)?,
+                    use_script: use_script != 0,
                 })
             })
             .optional()
@@ -244,8 +248,8 @@ impl MockRepository for SqliteRepository {
 
         let method = Self::method_to_string(&rule.method);
         conn.execute(
-            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                ON CONFLICT(id) DO UPDATE SET
                    url_pattern = excluded.url_pattern,
                    is_regex = excluded.is_regex,
@@ -254,7 +258,8 @@ impl MockRepository for SqliteRepository {
                    forward_and_record = excluded.forward_and_record,
                    mock_response = excluded.mock_response,
                    script = excluded.script,
-                   delay_ms = excluded.delay_ms"#,
+                   delay_ms = excluded.delay_ms,
+                   use_script = excluded.use_script"#,
             params![
                 rule.id,
                 rule.service_id,
@@ -266,6 +271,7 @@ impl MockRepository for SqliteRepository {
                 rule.mock_response,
                 rule.script.as_deref(),
                 rule.delay_ms.map(|v| v as i64),
+                rule.use_script as i32,
             ],
         )
         .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -354,6 +360,7 @@ mod tests {
             r#"{"code": 200}"#.to_string(),
             None,
             None,
+            false,
         );
 
         // Create
@@ -425,6 +432,7 @@ mod tests {
             r#"{"code": 200}"#.to_string(),
             None,
             None,
+            false,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -440,6 +448,7 @@ mod tests {
             r#"{"code": 201}"#.to_string(),
             None,
             None,
+            false,
         );
         repo.save_rule(&updated).await.unwrap();
 
@@ -528,6 +537,7 @@ mod tests {
                 "{}".to_string(),
                 None,
                 None,
+                false,
             );
             repo.save_rule(&rule).await.unwrap();
         }
@@ -572,6 +582,7 @@ mod tests {
                 "{}".to_string(),
                 None,
                 None,
+                false,
             );
             repo.save_rule(&rule).await.unwrap();
 
@@ -604,6 +615,7 @@ mod tests {
             "{}".to_string(),
             None,
             None,
+            false,
         );
         repo.save_rule(&rule_enabled).await.unwrap();
 
@@ -618,6 +630,7 @@ mod tests {
             "{}".to_string(),
             None,
             None,
+            false,
         );
         repo.save_rule(&rule_disabled).await.unwrap();
 
@@ -651,6 +664,7 @@ mod tests {
             "{}".to_string(),
             None,
             None,
+            false,
         );
         repo.save_rule(&rule).await.unwrap();
 
@@ -700,6 +714,7 @@ mod tests {
                 "{}".to_string(),
                 None,
                 None,
+                false,
             );
             repo.save_rule(&rule).await.unwrap();
         }
@@ -762,6 +777,7 @@ mod tests {
             "{}".to_string(),
             Some("return { code: 0 };".to_string()),
             Some(250),
+            false,
         );
         repo.save_rule(&updated).await.unwrap();
         let found = repo.get_rule("rule-1").await.unwrap().unwrap();

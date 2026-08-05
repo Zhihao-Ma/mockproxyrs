@@ -233,6 +233,7 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
         params.mock_response.unwrap_or_default(),
         params.script,
         params.delay_ms,
+        params.use_script.unwrap_or(false),
     );
 
     state
@@ -263,6 +264,7 @@ pub async fn update_rule(
     mock_response: String,
     script: Option<String>,
     delay_ms: Option<u64>,
+    use_script: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let rule = MockRule::new(
@@ -276,6 +278,7 @@ pub async fn update_rule(
         mock_response,
         script.filter(|s| !s.is_empty()),
         delay_ms,
+        use_script,
     );
 
     state

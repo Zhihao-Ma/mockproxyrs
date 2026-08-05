@@ -8,6 +8,7 @@ import CodeEditor from "@/components/CodeEditor.vue";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
+import { ru } from "element-plus/lib/locale/index.js";
 
 const route = useRoute();
 
@@ -33,12 +34,55 @@ const isRunning = ref(false);
 async function handleStart() {
   await updateService({...form})
   await startService(form.id);
+  recordTargetHistory(form.id, form.targetUrl);
   isRunning.value = true;
 }
 
 async function handleStop() {
   await stopService(form.id);
   isRunning.value = false;
+}
+
+/** 目标地址历史记录（localStorage 持久化，按服务区分，每服务最多 10 条） */
+function targetHistoryKey(serviceId: string) {
+  return `mockproxyrs:target-history:${serviceId}`;
+}
+
+function loadTargetHistory(serviceId: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(targetHistoryKey(serviceId)) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function recordTargetHistory(serviceId: string, url: string) {
+  if (!url || !url.trim()) return;
+  const list = loadTargetHistory(serviceId).filter((u) => u !== url.trim());
+  list.unshift(url.trim());
+  localStorage.setItem(targetHistoryKey(serviceId), JSON.stringify(list.slice(0, 10)));
+}
+
+/** el-autocomplete 下拉建议回调缓存，用于删除后即时刷新 */
+let lastSuggestCb: ((results: { value: string }[]) => void) | null = null;
+
+function removeTargetHistory(serviceId: string, url: string) {
+  const list = loadTargetHistory(serviceId).filter((u) => u !== url);
+  localStorage.setItem(targetHistoryKey(serviceId), JSON.stringify(list));
+  // 立即刷新当前下拉框
+  if (lastSuggestCb) {
+    lastSuggestCb(list.map((u) => ({ value: u })));
+  }
+}
+
+/** el-autocomplete 建议查询：聚焦时返回该服务最近 10 条历史 */
+function queryTargetHistory(
+  _queryString: string,
+  cb: (results: { value: string }[]) => void
+) {
+  const list = loadTargetHistory(form.id);
+  lastSuggestCb = cb;
+  cb(list.map((u) => ({ value: u })));
 }
 
 function addNewRule() {
@@ -53,7 +97,7 @@ function addNewRule() {
     mockResponse: "",
     script: null,
     delayMs: null,
-    advancedEnabled: false,
+    useScript: false,
   });
 }
 
@@ -73,6 +117,7 @@ async function saveRule(index: number) {
       mockResponse: rule.mockResponse,
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
+      useScript: rule.useScript,
     });
   } else {
     const id = await addRule({
@@ -85,18 +130,19 @@ async function saveRule(index: number) {
       mockResponse: rule.mockResponse,
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
+      useScript: rule.useScript,
     });
     rule.id = id;
   }
 }
 
 function usesAdvancedMock(rule: MockRule) {
-  return Boolean(rule.advancedEnabled);
+  return Boolean(rule.useScript);
 }
 
 function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
   const rule = rules.value[index];
-  rule.advancedEnabled = !!enabled;
+  rule.useScript = !!enabled;
   if (enabled && !rule.script) {
     rule.script = 'return { code: 0, data: {} };';
   }
@@ -228,7 +274,7 @@ async function loadService(id: string) {
     const ruleList = await listRules(id);
     rules.value = ruleList.map(r => ({
       ...r,
-      advancedEnabled: Boolean(r.script && r.script.trim()),
+      useScript: r.useScript,
     }));
   }
 }
@@ -302,7 +348,27 @@ watch(
           </el-col>
           <el-col :span="8">
             <el-form-item label="目标地址">
-              <el-input v-model="form.targetUrl" />
+              <el-autocomplete
+                :key="form.id"
+                v-model="form.targetUrl"
+                :fetch-suggestions="queryTargetHistory"
+                trigger-on-focus
+                clearable
+                placeholder="输入目标地址，或从历史中选择"
+              >
+                <template #default="{ item }">
+                  <div class="history-item">
+                    <span class="history-item__url">{{ item.value }}</span>
+                    <span
+                      class="history-item__del"
+                      title="删除该历史记录"
+                      @click.stop="removeTargetHistory(form.id, item.value)"
+                    >
+                      ✕
+                    </span>
+                  </div>
+                </template>
+              </el-autocomplete>
             </el-form-item>
           </el-col>
         </el-row>
@@ -742,5 +808,43 @@ watch(
   100% {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0), inset 0 0 0 100px rgba(245, 108, 108, 0);
   }
+}
+</style>
+
+<!-- 目标地址历史下拉项样式：el-autocomplete 的 popper teleport 到 body，scoped 命中不了，需全局 -->
+<style lang="scss">
+.el-autocomplete-suggestion li .history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.history-item__url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item__del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 1;
+  color: #c0c4cc;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.history-item__del:hover {
+  color: #f56c6c;
+  background-color: rgba(245, 108, 108, 0.1);
 }
 </style>
