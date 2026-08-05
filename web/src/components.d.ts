@@ -12,6 +12,7 @@ declare module 'vue' {
     CodeEditorPane: typeof import('./components/CodeEditorPane.vue')['default']
     Content: typeof import('./components/Content.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
+    ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCard: typeof import('element-plus/es')['ElCard']
     ElCol: typeof import('element-plus/es')['ElCol']

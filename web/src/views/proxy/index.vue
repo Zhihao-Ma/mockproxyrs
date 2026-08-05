@@ -34,12 +34,42 @@ const isRunning = ref(false);
 async function handleStart() {
   await updateService({...form})
   await startService(form.id);
+  recordTargetHistory(form.id, form.targetUrl);
   isRunning.value = true;
 }
 
 async function handleStop() {
   await stopService(form.id);
   isRunning.value = false;
+}
+
+/** 目标地址历史记录（localStorage 持久化，按服务区分，每服务最多 10 条） */
+function targetHistoryKey(serviceId: string) {
+  return `mockproxyrs:target-history:${serviceId}`;
+}
+
+function loadTargetHistory(serviceId: string): string[] {
+  try {
+    return JSON.parse(localStorage.getItem(targetHistoryKey(serviceId)) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function recordTargetHistory(serviceId: string, url: string) {
+  if (!url || !url.trim()) return;
+  const list = loadTargetHistory(serviceId).filter((u) => u !== url.trim());
+  list.unshift(url.trim());
+  localStorage.setItem(targetHistoryKey(serviceId), JSON.stringify(list.slice(0, 10)));
+}
+
+/** el-autocomplete 建议查询：聚焦时返回该服务最近 10 条历史 */
+function queryTargetHistory(
+  _queryString: string,
+  cb: (results: { value: string }[]) => void
+) {
+  const list = loadTargetHistory(form.id);
+  cb(list.map((u) => ({ value: u })));
 }
 
 function addNewRule() {
@@ -305,7 +335,14 @@ watch(
           </el-col>
           <el-col :span="8">
             <el-form-item label="目标地址">
-              <el-input v-model="form.targetUrl" />
+              <el-autocomplete
+                :key="form.id"
+                v-model="form.targetUrl"
+                :fetch-suggestions="queryTargetHistory"
+                trigger-on-focus
+                clearable
+                placeholder="输入目标地址，或从历史中选择"
+              />
             </el-form-item>
           </el-col>
         </el-row>
