@@ -63,12 +63,25 @@ function recordTargetHistory(serviceId: string, url: string) {
   localStorage.setItem(targetHistoryKey(serviceId), JSON.stringify(list.slice(0, 10)));
 }
 
+/** el-autocomplete 下拉建议回调缓存，用于删除后即时刷新 */
+let lastSuggestCb: ((results: { value: string }[]) => void) | null = null;
+
+function removeTargetHistory(serviceId: string, url: string) {
+  const list = loadTargetHistory(serviceId).filter((u) => u !== url);
+  localStorage.setItem(targetHistoryKey(serviceId), JSON.stringify(list));
+  // 立即刷新当前下拉框
+  if (lastSuggestCb) {
+    lastSuggestCb(list.map((u) => ({ value: u })));
+  }
+}
+
 /** el-autocomplete 建议查询：聚焦时返回该服务最近 10 条历史 */
 function queryTargetHistory(
   _queryString: string,
   cb: (results: { value: string }[]) => void
 ) {
   const list = loadTargetHistory(form.id);
+  lastSuggestCb = cb;
   cb(list.map((u) => ({ value: u })));
 }
 
@@ -342,7 +355,20 @@ watch(
                 trigger-on-focus
                 clearable
                 placeholder="输入目标地址，或从历史中选择"
-              />
+              >
+                <template #default="{ item }">
+                  <div class="history-item">
+                    <span class="history-item__url">{{ item.value }}</span>
+                    <span
+                      class="history-item__del"
+                      title="删除该历史记录"
+                      @click.stop="removeTargetHistory(form.id, item.value)"
+                    >
+                      ✕
+                    </span>
+                  </div>
+                </template>
+              </el-autocomplete>
             </el-form-item>
           </el-col>
         </el-row>
@@ -782,5 +808,43 @@ watch(
   100% {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0), inset 0 0 0 100px rgba(245, 108, 108, 0);
   }
+}
+</style>
+
+<!-- 目标地址历史下拉项样式：el-autocomplete 的 popper teleport 到 body，scoped 命中不了，需全局 -->
+<style lang="scss">
+.el-autocomplete-suggestion li .history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
+.history-item__url {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item__del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 1;
+  color: #c0c4cc;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.2s ease, background-color 0.2s ease;
+}
+
+.history-item__del:hover {
+  color: #f56c6c;
+  background-color: rgba(245, 108, 108, 0.1);
 }
 </style>
