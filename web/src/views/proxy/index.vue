@@ -8,7 +8,6 @@ import CodeEditor from "@/components/CodeEditor.vue";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
-import { ru } from "element-plus/lib/locale/index.js";
 
 const route = useRoute();
 
