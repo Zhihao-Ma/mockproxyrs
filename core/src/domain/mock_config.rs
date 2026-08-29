@@ -14,6 +14,8 @@
 
 //! Mock 配置领域模型
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Mock 服务配置（持久化）
@@ -264,6 +266,12 @@ pub struct ResponseEvent {
     pub response_body: String,
     /// mock 响应内容（如果有）
     pub mock_body: Option<String>,
+    /// 请求头（键值对，header 名小写）
+    #[serde(default)]
+    pub request_headers: HashMap<String, String>,
+    /// 响应头（键值对，header 名小写）
+    #[serde(default)]
+    pub response_headers: HashMap<String, String>,
     /// 时间戳（毫秒）
     pub timestamp: i64,
 }
@@ -298,6 +306,8 @@ impl ResponseEvent {
             forwarded,
             response_body,
             mock_body,
+            request_headers: HashMap::new(),
+            response_headers: HashMap::new(),
             timestamp,
         }
     }

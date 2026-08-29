@@ -253,6 +253,8 @@ async fn handle_request(
 ) -> std::result::Result<Response<HttpBody>, hyper::Error> {
     let url = req.uri().to_string();
     let method = req.method().clone().to_string();
+    // 提前采集请求头（后续 req 可能被 into_parts 消费）
+    let request_headers = headers_to_map(req.headers());
 
     // 读取规则
     let rules_guard = rules.read().await;
@@ -350,6 +352,9 @@ async fn handle_request(
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
 
+    // 采集最终返回给客户端的响应头
+    let response_headers = headers_to_map(response.headers());
+
     // 发送事件
     let event = ResponseEvent::new(
         config.id.clone(),
@@ -364,6 +369,11 @@ async fn handle_request(
         response_body,
         mock_body_for_event,
     );
+    let event = ResponseEvent {
+        request_headers,
+        response_headers,
+        ..event
+    };
 
     if let Err(e) = event_emitter.emit(event).await {
         error!("Error emitting event: {}", e);

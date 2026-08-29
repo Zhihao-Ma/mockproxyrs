@@ -111,6 +111,10 @@ export interface ResponseEvent {
   responseBody: string;
   /** mock 响应内容 */
   mockBody: string | null;
+  /** 请求头（键值对，header 名小写） */
+  requestHeaders: Record<string, string>;
+  /** 响应头（键值对，header 名小写） */
+  responseHeaders: Record<string, string>;
   /** 时间戳（毫秒） */
   timestamp: number;
 }
