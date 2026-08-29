@@ -43,6 +43,20 @@ const collapsed = ref<Record<string, boolean>>({});
 /** 内容区滚动容器引用，用于判断规则是否在当前可见范围内 */
 const contentEl = ref<HTMLElement | null>(null);
 
+/** 当前悬浮规则 URL 的提示内容：仅当 URL 被截断时赋值，空串则禁用 tooltip */
+const hoverUrl = ref("");
+
+/** 悬浮规则条目：判断 URL 是否被截断，截断才显示完整 URL 提示 */
+function onNavItemEnter(rule: RuleVM, e: MouseEvent) {
+  const urlEl = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".rule-nav__url");
+  const truncated = urlEl ? urlEl.scrollWidth > urlEl.clientWidth : false;
+  hoverUrl.value = truncated ? rule.urlPattern || "" : "";
+}
+
+function onNavItemLeave() {
+  hoverUrl.value = "";
+}
+
 function isCollapsed(rule: RuleVM): boolean {
   return collapsed.value[rule._key] === true;
 }
@@ -419,11 +433,20 @@ watch(
           class="rule-nav__item"
           :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
           @click="handleNavClick(rule)"
+          @mouseenter="onNavItemEnter(rule, $event)"
+          @mouseleave="onNavItemLeave"
         >
           <span class="rule-nav__dot"></span>
-          <span class="rule-nav__url" :title="rule.urlPattern || '(未设置 URL)'">
-            {{ rule.urlPattern || "(未设置 URL)" }}
-          </span>
+          <el-tooltip
+            :content="hoverUrl"
+            :disabled="!hoverUrl"
+            placement="right"
+            :show-after="300"
+          >
+            <span class="rule-nav__url">
+              {{ rule.urlPattern || "(未设置 URL)" }}
+            </span>
+          </el-tooltip>
         </div>
         <div v-if="rules.length === 0" class="rule-nav__empty">暂无规则</div>
       </div>
@@ -729,6 +752,8 @@ watch(
 }
 
 .rule-nav__url {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   color: #86868b;
   overflow: hidden;
