@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted, watch, nextTick } from "vue";
+import { reactive, ref, computed, onMounted, watch, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
@@ -9,6 +9,7 @@ import { useLayoutStore } from "@/stores";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
+import { Fold, Expand } from "@element-plus/icons-vue";
 
 const route = useRoute();
 const layoutStore = useLayoutStore();
@@ -79,6 +80,37 @@ function collapseAll() {
   const next: Record<string, boolean> = {};
   for (const r of rules.value) next[r._key] = true;
   collapsed.value = next;
+}
+
+/** 是否所有规则都已展开（用于折叠/展开单一图标按钮的态与文案） */
+const allExpanded = computed(() => {
+  if (rules.value.length === 0) return false;
+  return rules.value.every((r) => !isCollapsed(r));
+});
+
+/** 折叠/展开单一图标按钮：全展开时收起，否则全部展开 */
+function toggleExpandAll() {
+  if (allExpanded.value) {
+    collapseAll();
+  } else {
+    expandAll();
+  }
+}
+
+/** 是否所有规则都已启用（无规则时视为 false） */
+const allEnabled = computed(() => {
+  return rules.value.length > 0 && rules.value.every((r) => r.enabled);
+});
+
+/** 全部启用/全部禁用总开关 */
+async function toggleAllEnabled(enabled: boolean) {
+  for (let i = 0; i < rules.value.length; i++) {
+    rules.value[i].enabled = enabled;
+    // 仅保存已填写 URL 的规则；空白的新建规则留待后续填写时保存
+    if (rules.value[i].urlPattern) {
+      await saveRule(i);
+    }
+  }
 }
 
 /**
@@ -518,20 +550,32 @@ watch(
     <el-card class="rules-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">Mock 规则</span>
+          <div class="card-header-left">
+            <span class="card-title">Mock 规则</span>
+            <div class="all-enable">
+              <span class="all-enable__label">全部启用</span>
+              <el-switch
+                :model-value="allEnabled"
+                :disabled="rules.length === 0"
+                @change="(val: string | number | boolean) => toggleAllEnabled(!!val)"
+              />
+            </div>
+          </div>
           <div class="card-actions">
             <el-button type="danger" style="color: #fff;" plain :disabled="rules.length === 0" @click="handleClearRules">
               清空规则
             </el-button>
-            <el-button :disabled="rules.length === 0" @click="expandAll">
-              全部展开
-            </el-button>
-            <el-button :disabled="rules.length === 0" @click="collapseAll">
-              全部收起
-            </el-button>
             <el-button type="primary" @click="addNewRule">
               添加规则
             </el-button>
+            <el-tooltip :content="allExpanded ? '全部收起' : '全部展开'" placement="top">
+              <el-button
+                class="expand-toggle-btn"
+                :disabled="rules.length === 0"
+                :icon="allExpanded ? Fold : Expand"
+                @click="toggleExpandAll"
+              />
+            </el-tooltip>
           </div>
         </div>
       </template>
@@ -817,6 +861,24 @@ watch(
   align-items: center;
 }
 
+.card-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.all-enable {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.all-enable__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #86868b;
+}
+
 .card-title {
   font-size: 17px;
   font-weight: 600;
@@ -825,6 +887,7 @@ watch(
 
 .card-actions {
   display: flex;
+  align-items: center;
   gap: 12px;
 }
 
