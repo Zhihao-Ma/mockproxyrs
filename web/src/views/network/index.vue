@@ -13,6 +13,7 @@ const { recording, logDataView } = storeToRefs(networkStore);
 const showDrawer = ref(false);
 const selectedRequestDetails = ref<{
   response: string;
+  requestBody: string;
   mockBody: string | null;
   isMock: boolean;
   forwarded: boolean;
@@ -20,6 +21,7 @@ const selectedRequestDetails = ref<{
   responseHeaders: Record<string, string>;
 }>({
   response: "",
+  requestBody: "",
   mockBody: null,
   isMock: false,
   forwarded: false,
@@ -92,6 +94,7 @@ async function applyAndJump(row: ResponseEvent) {
 function rowClick(row: ResponseEvent) {
   selectedRequestDetails.value = {
     response: row.responseBody,
+    requestBody: row.requestBody || "",
     mockBody: row.mockBody,
     isMock: row.isMock,
     forwarded: row.forwarded,
@@ -121,6 +124,7 @@ function displayBody(source: string): string {
 /** 请求详情用：格式化后的响应内容 */
 const responseDisplay = computed(() => displayBody(selectedRequestDetails.value.response));
 const mockBodyDisplay = computed(() => displayBody(selectedRequestDetails.value.mockBody || ""));
+const payloadDisplay = computed(() => displayBody(selectedRequestDetails.value.requestBody));
 
 /** header 条目列表（用于 v-for 展示） */
 const requestHeaderEntries = computed(() => Object.entries(selectedRequestDetails.value.requestHeaders));
@@ -209,6 +213,13 @@ const responseHeaderEntries = computed(() => Object.entries(selectedRequestDetai
     </el-card>
 
     <el-drawer v-model="showDrawer" title="请求详情" size="480px">
+      <div class="detail-section">
+        <div class="detail-header">
+          <h3 class="detail-title">Payload</h3>
+        </div>
+        <pre v-if="selectedRequestDetails.requestBody" class="code-block">{{ payloadDisplay }}</pre>
+        <div v-else class="header-empty">无请求体</div>
+      </div>
       <div class="detail-section">
         <div class="detail-header">
           <h3 class="detail-title">请求 Header</h3>

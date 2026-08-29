@@ -109,6 +109,8 @@ export interface ResponseEvent {
   forwarded: boolean;
   /** 实际响应内容 */
   responseBody: string;
+  /** 请求体（payload）原始字符串，可能为空 */
+  requestBody: string;
   /** mock 响应内容 */
   mockBody: string | null;
   /** 请求头（键值对，header 名小写） */

@@ -16,7 +16,8 @@
 //!
 //! 负责将请求转发到目标服务器，支持 HTTP 和 HTTPS。
 
-use hyper::body::Incoming;
+use http_body_util::Full;
+use hyper::body::{Bytes, Incoming};
 use hyper::{Request, Response};
 use hyper_tls::HttpsConnector;
 use hyper_util::client::legacy::Client;
@@ -32,9 +33,9 @@ use crate::error::{MockproxyrsError, Result};
 #[derive(Debug, Clone)]
 pub struct UpstreamClient {
     /// HTTP 客户端
-    http_client: Client<HttpConnector, Incoming>,
+    http_client: Client<HttpConnector, Full<Bytes>>,
     /// HTTPS 客户端
-    https_client: Client<HttpsConnector<HttpConnector>, Incoming>,
+    https_client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
 }
 
 impl Default for UpstreamClient {
@@ -71,14 +72,14 @@ impl UpstreamClient {
     /// 转发请求到目标地址
     ///
     /// # Arguments
-    /// * `req` - 原始请求
+    /// * `req` - 原始请求（body 为已读取的 `Full<Bytes>`）
     /// * `target_url` - 目标地址（如 "https://example.com"）
     ///
     /// # Returns
     /// 目标服务器的响应
     pub async fn forward(
         &self,
-        req: Request<Incoming>,
+        req: Request<Full<Bytes>>,
         target_url: &str,
     ) -> Result<Response<Incoming>> {
         let (mut parts, body) = req.into_parts();

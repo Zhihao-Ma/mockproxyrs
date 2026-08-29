@@ -264,6 +264,9 @@ pub struct ResponseEvent {
     pub forwarded: bool,
     /// 实际响应内容
     pub response_body: String,
+    /// 请求体（playload）原始字符串，可能为空
+    #[serde(default)]
+    pub request_body: String,
     /// mock 响应内容（如果有）
     pub mock_body: Option<String>,
     /// 请求头（键值对，header 名小写）
@@ -305,6 +308,7 @@ impl ResponseEvent {
             is_mock,
             forwarded,
             response_body,
+            request_body: String::new(),
             mock_body,
             request_headers: HashMap::new(),
             response_headers: HashMap::new(),
