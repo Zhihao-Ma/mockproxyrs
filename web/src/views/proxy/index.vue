@@ -377,11 +377,30 @@ watch(
 </script>
 
 <template>
-  <main class="container">
-    <div class="page-header">
-      <h2 class="page-title">服务配置</h2>
-      <p class="page-subtitle">配置 Mock 服务的监听地址和转发规则</p>
-    </div>
+  <main class="proxy-wrap">
+    <aside class="rule-nav">
+      <div class="rule-nav__header">规则列表</div>
+      <div class="rule-nav__body">
+        <div
+          v-for="rule in rules"
+          :key="rule._key"
+          class="rule-nav__item"
+          :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
+          @click="handleNavClick(rule)"
+        >
+          <span class="rule-nav__dot"></span>
+          <span class="rule-nav__url" :title="rule.urlPattern || '(未设置 URL)'">
+            {{ rule.urlPattern || "(未设置 URL)" }}
+          </span>
+        </div>
+        <div v-if="rules.length === 0" class="rule-nav__empty">暂无规则</div>
+      </div>
+    </aside>
+    <div class="container">
+      <div class="page-header">
+        <h2 class="page-title">服务配置</h2>
+        <p class="page-subtitle">配置 Mock 服务的监听地址和转发规则</p>
+      </div>
 
     <el-card class="config-card">
       <template #header>
@@ -461,23 +480,7 @@ watch(
           </div>
         </div>
       </template>
-      <div class="rules-layout">
-        <aside class="rules-nav">
-          <div
-            v-for="rule in rules"
-            :key="rule._key"
-            class="rules-nav__item"
-            :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
-            @click="handleNavClick(rule)"
-          >
-            <span class="rules-nav__dot"></span>
-            <span class="rules-nav__url" :title="rule.urlPattern || '(未设置 URL)'">
-              {{ rule.urlPattern || "(未设置 URL)" }}
-            </span>
-          </div>
-          <div v-if="rules.length === 0" class="rules-nav__empty">暂无规则</div>
-        </aside>
-        <div class="rule-container">
+      <div class="rule-container">
           <template v-for="(rule, index) in rules" :key="rule._key">
             <div class="rule-card" :id="rule._key">
               <!-- 收起态：折叠图标 + 启用开关 + URL -->
@@ -616,14 +619,110 @@ watch(
             <div class="empty-text">暂无规则，点击上方按钮添加</div>
           </div>
         </div>
-      </div>
     </el-card>
+    </div>
   </main>
 </template>
 
 <style scoped lang="scss">
+/* 页面级布局：左侧规则导航列 + 右侧内容区，占满父级高度不参与外层滚动 */
+.proxy-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  background: #f5f5f7;
+}
+
+.rule-nav {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.rule-nav__header {
+  padding: 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 11px;
+  font-weight: 600;
+  color: #86868b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.rule-nav__body {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rule-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.rule-nav__item:hover {
+  background: #f0f0f5;
+}
+
+.rule-nav__item.is-active {
+  background: #eaf2ff;
+}
+
+.rule-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d2d2d7;
+  flex-shrink: 0;
+}
+
+.rule-nav__item.is-enabled .rule-nav__dot {
+  background: #34c759;
+}
+
+.rule-nav__url {
+  font-size: 13px;
+  color: #86868b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rule-nav__item.is-active .rule-nav__url {
+  color: #1d1d1f;
+  font-weight: 500;
+}
+
+.rule-nav__item.is-enabled .rule-nav__url {
+  color: #1d1d1f;
+}
+
+.rule-nav__empty {
+  padding: 12px;
+  font-size: 13px;
+  color: #c0c0c5;
+  text-align: center;
+}
+
 .container {
   flex: 1;
+  min-width: 0;
   padding: 32px;
   overflow-y: auto;
   background: #f5f5f7;
@@ -720,83 +819,6 @@ watch(
   gap: 16px;
   flex: 1;
   min-width: 0;
-}
-
-.rules-layout {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-
-.rules-nav {
-  width: 240px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-height: 640px;
-  overflow-y: auto;
-  border-radius: 12px;
-  background: #fafafa;
-  padding: 8px;
-  /* 列表较长时侧边栏跟随滚动，保持可点 */
-  position: sticky;
-  top: 16px;
-}
-
-.rules-nav__item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s ease;
-}
-
-.rules-nav__item:hover {
-  background: #f0f0f5;
-}
-
-.rules-nav__item.is-active {
-  background: #eaf2ff;
-}
-
-.rules-nav__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #d2d2d7;
-  flex-shrink: 0;
-}
-
-.rules-nav__item.is-enabled .rules-nav__dot {
-  background: #34c759;
-}
-
-.rules-nav__url {
-  font-size: 13px;
-  color: #86868b;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rules-nav__item.is-active .rules-nav__url {
-  color: #1d1d1f;
-  font-weight: 500;
-}
-
-.rules-nav__item.is-enabled .rules-nav__url {
-  color: #1d1d1f;
-}
-
-.rules-nav__empty {
-  padding: 12px;
-  font-size: 13px;
-  color: #c0c0c5;
-  text-align: center;
 }
 
 .rule-header__left {
