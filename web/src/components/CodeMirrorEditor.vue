@@ -108,13 +108,18 @@ onBeforeUnmount(() => {
   border-color: #667eea;
 }
 
-/* 弹窗模式：填满 flex 父容器高度，仅面板内部滚动 */
+/* 弹窗模式：填满 flex 父容器高度，仅面板内部滚动。
+   宿主本身在弹窗 body 中是 flex item（flex:1; min-height:0），
+   这里再作为 flex 列容器，让 .cm-editor 用 flex-grow 撑满，避免百分比高度依赖。 */
 .cm-host.is-fill {
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .cm-host.is-fill :deep(.cm-editor) {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
 }
 
 .cm-host :deep(.cm-scroller) {
