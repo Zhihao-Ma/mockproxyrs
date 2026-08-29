@@ -62,13 +62,36 @@ jobs:
           releaseBody: |
             ## MockProxyRS ${{ github.ref_name }}
 
-            ### 安装说明
-            - **Windows**: 下载 `.msi` 或 `.exe` 安装包
-            - **macOS**: 下载 `.dmg` 或 `.app.tar.gz`
-            - **Linux**: 下载 `.deb` 或 `.AppImage`
+            ### 安装说明 / Installation
+            - **Windows**: 下载 `.msi` 或 `.exe` 安装包 / Download the `.msi` or `.exe` installer
+            - **macOS**: 下载 `.dmg` 或 `.app.tar.gz` / Download the `.dmg` or `.app.tar.gz`
+            - **Linux**: 下载 `.deb` 或 `.AppImage` / Download the `.deb` or `.AppImage`
 
-            ### 变更内容
-            请查看提交历史了解详细变更。
+            ### 变更内容 / Changes
+
+            **规则管理 / Rule Management**
+            - 规则卡片支持折叠/展开，收起态精简展示（仅启用状态 + URL）
+              Rule cards can be collapsed/expanded; collapsed view shows only enabled state and URL
+            - 新增左侧规则导航侧边栏，按启用状态着色，点击定位到对应规则
+              New left-hand rule navigation sidebar, color-coded by enabled state, click to jump to a rule
+            - 支持全部展开/收起与全部启用/禁用
+              Added expand/collapse-all and enable/disable-all controls
+            - 规则按创建时间倒序排列（新增置顶）
+              Rules are ordered newest-first by creation time
+
+            **编辑器 / Editor**
+            - JSON 与 JS 脚本编辑器升级为 CodeMirror 6，支持花括号/函数体折叠
+              JSON and JS editors upgraded to CodeMirror 6 with brace/function folding
+
+            **网络监控 / Network Monitoring**
+            - 响应体 JSON 自动格式化展示
+              JSON response bodies are auto-formatted
+            - 请求详情新增请求头、响应头与 Payload 展示
+              Request detail now shows request headers, response headers, and payload
+
+            **桌面 / Desktop**
+            - 默认窗口宽度调整为 1000px
+              Default window width increased to 1000px
           releaseDraft: false
           prerelease: false
           includeDebug: false

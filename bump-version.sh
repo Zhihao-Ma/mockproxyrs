@@ -43,6 +43,21 @@ for f in "${FILES[@]}"; do
   rm -f "${f}.bak"
 done
 
+# Cargo.lock 单独精确处理：只改 name = "mockproxyrs" 块内的 version，
+# 避免误改 alloc-stdlib / rand_chacha 等恰好同版本的第三方依赖
+CARGO_LOCK="Cargo.lock"
+if [ -f "$CARGO_LOCK" ]; then
+  echo "🔄 更新: $CARGO_LOCK"
+  awk -v new="$NEW_VER" '
+    /^name = "mockproxyrs"$/ { found=1; print; next }
+    found && /^version = / {
+      gsub(/"[0-9]+\.[0-9]+\.[0-9]+"/, "\"" new "\"")
+      found=0
+    }
+    { print }
+  ' "$CARGO_LOCK" > "$CARGO_LOCK.tmp" && mv "$CARGO_LOCK.tmp" "$CARGO_LOCK"
+fi
+
 echo ""
 
 # ===================== 自动安装依赖 =====================
@@ -55,6 +70,6 @@ echo "📦 安装 desktop 依赖..."
 echo ""
 echo "🎉 版本升级完成！新版本: $NEW_VER"
 echo ""
-echo "👉 提交命令："
-echo "   git add ."
+echo "👉 提交命令（精确 add，勿用 git add . 以免卷入无关文件）："
+echo "   git add web/package.json web/package-lock.json desktop/package.json desktop/package-lock.json desktop/src-tauri/tauri.conf.json desktop/src-tauri/Cargo.toml Cargo.lock"
 echo "   git commit -m \"chore: bump version to $NEW_VER\""

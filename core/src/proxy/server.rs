@@ -253,6 +253,13 @@ async fn handle_request(
 ) -> std::result::Result<Response<HttpBody>, hyper::Error> {
     let url = req.uri().to_string();
     let method = req.method().clone().to_string();
+    // 提前采集请求头（后续 req 可能被 into_parts 消费）
+    let request_headers = headers_to_map(req.headers());
+
+    // 读取请求体（playload）一次，后续脚本与转发分支复用原始内容
+    let (parts, body) = req.into_parts();
+    let body_bytes = body.collect().await?.to_bytes();
+    let request_body = String::from_utf8_lossy(&body_bytes).into_owned();
 
     // 读取规则
     let rules_guard = rules.read().await;
@@ -286,14 +293,11 @@ async fn handle_request(
     let (response, response_body) = if is_mock && use_script {
         #[allow(clippy::unnecessary_unwrap)]
         let script = script.expect("script checked above");
-        let (parts, body) = req.into_parts();
-        let bytes = body.collect().await?.to_bytes();
-        let request_body = String::from_utf8_lossy(&bytes).into_owned();
         let request_context = RequestContext::new(
             method.clone(),
             url.clone(),
             headers_to_map(&parts.headers),
-            request_body,
+            request_body.clone(),
         );
 
         match execute_script((*script_engine).clone(), request_context, script).await {
@@ -316,8 +320,9 @@ async fn handle_request(
             }
         }
     } else if !is_mock || forward_and_record {
-        // 转发请求
-        match client.forward(req, &config.target_url).await {
+        // 转发请求（用已读取的 body 重建请求）
+        let forward_req = Request::from_parts(parts.clone(), Full::new(body_bytes.clone()));
+        match client.forward(forward_req, &config.target_url).await {
             Ok(resp) => {
                 let (parts, body) = resp.into_parts();
                 let bytes = body.collect().await?.to_bytes();
@@ -350,6 +355,9 @@ async fn handle_request(
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
     }
 
+    // 采集最终返回给客户端的响应头
+    let response_headers = headers_to_map(response.headers());
+
     // 发送事件
     let event = ResponseEvent::new(
         config.id.clone(),
@@ -364,6 +372,12 @@ async fn handle_request(
         response_body,
         mock_body_for_event,
     );
+    let event = ResponseEvent {
+        request_body,
+        request_headers,
+        response_headers,
+        ..event
+    };
 
     if let Err(e) = event_emitter.emit(event).await {
         error!("Error emitting event: {}", e);

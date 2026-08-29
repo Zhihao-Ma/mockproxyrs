@@ -13,14 +13,20 @@ const { recording, logDataView } = storeToRefs(networkStore);
 const showDrawer = ref(false);
 const selectedRequestDetails = ref<{
   response: string;
+  requestBody: string;
   mockBody: string | null;
   isMock: boolean;
   forwarded: boolean;
+  requestHeaders: Record<string, string>;
+  responseHeaders: Record<string, string>;
 }>({
   response: "",
+  requestBody: "",
   mockBody: null,
   isMock: false,
   forwarded: false,
+  requestHeaders: {},
+  responseHeaders: {},
 });
 
 const filterText = ref("");
@@ -88,12 +94,41 @@ async function applyAndJump(row: ResponseEvent) {
 function rowClick(row: ResponseEvent) {
   selectedRequestDetails.value = {
     response: row.responseBody,
+    requestBody: row.requestBody || "",
     mockBody: row.mockBody,
     isMock: row.isMock,
     forwarded: row.forwarded,
+    requestHeaders: row.requestHeaders || {},
+    responseHeaders: row.responseHeaders || {},
   };
   showDrawer.value = true;
 }
+
+/** 尝试把响应体按 JSON 格式化展示；非 JSON 时返回 null，由调用方回退原文 */
+function prettyJson(source: string): string | null {
+  if (!source) return null;
+  const trimmed = source.trim();
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return null;
+  try {
+    return JSON.stringify(JSON.parse(source), null, 2);
+  } catch {
+    return null;
+  }
+}
+
+/** 响应体展示：JSON 可解析则格式化，否则原文 */
+function displayBody(source: string): string {
+  return prettyJson(source) ?? source;
+}
+
+/** 请求详情用：格式化后的响应内容 */
+const responseDisplay = computed(() => displayBody(selectedRequestDetails.value.response));
+const mockBodyDisplay = computed(() => displayBody(selectedRequestDetails.value.mockBody || ""));
+const payloadDisplay = computed(() => displayBody(selectedRequestDetails.value.requestBody));
+
+/** header 条目列表（用于 v-for 展示） */
+const requestHeaderEntries = computed(() => Object.entries(selectedRequestDetails.value.requestHeaders));
+const responseHeaderEntries = computed(() => Object.entries(selectedRequestDetails.value.responseHeaders));
 </script>
 
 <template>
@@ -180,19 +215,50 @@ function rowClick(row: ResponseEvent) {
     <el-drawer v-model="showDrawer" title="请求详情" size="480px">
       <div class="detail-section">
         <div class="detail-header">
+          <h3 class="detail-title">Payload</h3>
+        </div>
+        <pre v-if="selectedRequestDetails.requestBody" class="code-block">{{ payloadDisplay }}</pre>
+        <div v-else class="header-empty">无请求体</div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-header">
+          <h3 class="detail-title">请求 Header</h3>
+        </div>
+        <div v-if="requestHeaderEntries.length" class="header-table">
+          <div v-for="[key, value] in requestHeaderEntries" :key="key" class="header-row">
+            <span class="header-key">{{ key }}</span>
+            <span class="header-value">{{ value }}</span>
+          </div>
+        </div>
+        <div v-else class="header-empty">无请求 Header</div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-header">
+          <h3 class="detail-title">响应 Header</h3>
+        </div>
+        <div v-if="responseHeaderEntries.length" class="header-table">
+          <div v-for="[key, value] in responseHeaderEntries" :key="key" class="header-row">
+            <span class="header-key">{{ key }}</span>
+            <span class="header-value">{{ value }}</span>
+          </div>
+        </div>
+        <div v-else class="header-empty">无响应 Header</div>
+      </div>
+      <div class="detail-section">
+        <div class="detail-header">
           <h3 class="detail-title">
             响应内容
             <span v-if="selectedRequestDetails.isMock" class="mock-badge">Mock</span>
             <span v-if="selectedRequestDetails.forwarded" class="forward-badge">转发</span>
           </h3>
         </div>
-        <pre class="code-block">{{ selectedRequestDetails.response }}</pre>
+        <pre class="code-block">{{ responseDisplay }}</pre>
       </div>
       <div v-if="selectedRequestDetails.mockBody" class="detail-section">
         <div class="detail-header">
           <h3 class="detail-title">Mock 响应</h3>
         </div>
-        <pre class="code-block">{{ selectedRequestDetails.mockBody }}</pre>
+        <pre class="code-block">{{ mockBodyDisplay }}</pre>
       </div>
     </el-drawer>
   </main>
@@ -364,5 +430,48 @@ function rowClick(row: ResponseEvent) {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.header-table {
+  border: 1px solid #e8e8ed;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.header-row {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid #f0f0f5;
+}
+
+.header-row:last-child {
+  border-bottom: none;
+}
+
+.header-key {
+  flex-shrink: 0;
+  min-width: 120px;
+  font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+  font-weight: 600;
+  color: #1d1d1f;
+  word-break: break-all;
+}
+
+.header-value {
+  flex: 1;
+  font-family: "SF Mono", Monaco, "Cascadia Code", monospace;
+  color: #86868b;
+  word-break: break-all;
+}
+
+.header-empty {
+  padding: 16px;
+  border: 1px dashed #d8d8de;
+  border-radius: 10px;
+  color: #c0c0c5;
+  font-size: 13px;
+  text-align: center;
 }
 </style>

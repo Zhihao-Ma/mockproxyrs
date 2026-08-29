@@ -1,7 +1,7 @@
 {
   "name": "mockproxyrs-web",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,8 +10,13 @@
     "type-check": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.9",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "codemirror": "^6.0.2",
     "element-plus": "^2.9.4",
     "pinia": "^3.0.3",
     "prettier": "^3.8.5",

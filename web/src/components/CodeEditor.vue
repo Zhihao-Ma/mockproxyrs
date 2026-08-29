@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import CodeEditorPane from "@/components/CodeEditorPane.vue";
+import CodeMirrorEditor from "@/components/CodeMirrorEditor.vue";
 
 /**
  * 代码编辑器组件
@@ -229,12 +230,12 @@ defineExpose({ format, validate, markSaved });
           {{ formatText }}
         </el-button>
       </div>
-      <CodeEditorPane
+      <CodeMirrorEditor
         class="code-editor__dialog-pane"
         :model-value="modelValue"
-        fill
+        :language="language"
         :placeholder="placeholder"
-        :error="!!error"
+        fill
         @update:model-value="setValue"
       />
       <div v-if="error" class="code-editor__error">{{ error }}</div>

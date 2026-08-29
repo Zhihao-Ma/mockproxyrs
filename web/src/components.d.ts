@@ -10,6 +10,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     CodeEditor: typeof import('./components/CodeEditor.vue')['default']
     CodeEditorPane: typeof import('./components/CodeEditorPane.vue')['default']
+    CodeMirrorEditor: typeof import('./components/CodeMirrorEditor.vue')['default']
     Content: typeof import('./components/Content.vue')['default']
     ElAside: typeof import('element-plus/es')['ElAside']
     ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']

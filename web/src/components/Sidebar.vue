@@ -4,8 +4,10 @@ import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { listServices, addService } from "@/api";
 import type { MockService } from "@/types";
+import { useLayoutStore } from "@/stores";
 
 const router = useRouter();
+const layoutStore = useLayoutStore();
 const dialogVisible = ref(false);
 const services = ref<MockService[]>([]);
 
@@ -29,6 +31,42 @@ const activeMenu = computed(() => {
   }
   return '-1'
 })
+
+/**
+ * 是否在服务配置页（/proxy）：该页存在规则列表侧边栏，按钮文案为「规则列表」；
+ * 其他页（如 /network）按钮文案为「展开/收起」。
+ */
+const isProxyRoute = computed(() => route.path === "/proxy");
+
+/**
+ * navbar 收窄状态：全局持久（navVisible），跨路由保持；
+ * navVisible=true 时 navbar 收窄为精简宽，两页一致，避免切换突兀。
+ */
+const isNarrow = computed(() => layoutStore.navVisible);
+
+/**
+ * 底部按钮配置：同一状态在不同页面含义不同。
+ * - 规则页：控制规则列表显隐，文案固定「规则列表」。
+ * - 其他页：控制 navbar 宽窄，navVisible=true（收窄）→「展开」，false（全宽）→「收起」。
+ */
+const toggleBtn = computed(() => {
+  if (isProxyRoute.value) {
+    return {
+      text: "规则列表",
+      icon: layoutStore.navVisible ? "⟨" : "⟩",
+      title: layoutStore.navVisible ? "隐藏规则列表" : "显示规则列表",
+    };
+  }
+  return {
+    text: layoutStore.navVisible ? "展开" : "收起",
+    icon: layoutStore.navVisible ? "⟩" : "⟨",
+    title: layoutStore.navVisible ? "展开" : "收起",
+  };
+});
+
+function handleToggleRules() {
+  layoutStore.toggleNav();
+}
 
 function resetForm() {
   Object.assign(form, initForm);
@@ -82,7 +120,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-aside width="240px" class="aside">
+  <el-aside :width="isNarrow ? '160px' : '240px'" class="aside" :class="{ 'is-narrow': isNarrow }">
     <div class="sidebar-header">
       <h1 class="logo">Mockproxyrs</h1>
     </div>
@@ -108,6 +146,19 @@ onMounted(() => {
           </div>
         </el-menu-item>
       </el-menu>
+    </div>
+
+    <!-- 底部按钮：同一状态按页面区分语义（规则页=规则列表，其他页=展开/收起） -->
+    <div class="sidebar-footer">
+      <button
+        class="nav-toggle-btn"
+        type="button"
+        :title="toggleBtn.title"
+        @click="handleToggleRules"
+      >
+        <span class="nav-toggle-btn__icon">{{ toggleBtn.icon }}</span>
+        <span class="nav-toggle-btn__text">{{ toggleBtn.text }}</span>
+      </button>
     </div>
 
     <teleport to="body">
@@ -161,6 +212,54 @@ onMounted(() => {
   flex: 1;
   padding: 16px 12px;
   overflow-y: auto;
+}
+
+/* 收窄态：减少内边距，缩小 logo */
+.aside.is-narrow .sidebar-header {
+  padding: 24px 16px;
+}
+
+.aside.is-narrow .logo {
+  font-size: 19px;
+}
+
+.aside.is-narrow .sidebar-content {
+  padding: 16px 10px;
+}
+
+/* 底部切换按钮区 */
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.nav-toggle-btn {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
+  cursor: pointer;
+  color: #86868b;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.nav-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1d1d1f;
+}
+
+.nav-toggle-btn__icon {
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .section-title {
