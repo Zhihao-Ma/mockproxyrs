@@ -45,6 +45,9 @@ function toggleNav() {
   navVisible.value = !navVisible.value;
 }
 
+/** 内容区滚动容器引用，用于判断规则是否在当前可见范围内 */
+const contentEl = ref<HTMLElement | null>(null);
+
 function isCollapsed(rule: RuleVM): boolean {
   return collapsed.value[rule._key] === true;
 }
@@ -69,10 +72,37 @@ function collapseAll() {
   collapsed.value = next;
 }
 
-/** 侧边栏点击：目标已展开则收起，否则展开并滚动定位高亮 */
+/**
+ * 判断规则卡片是否落在内容区当前可见范围内。
+ * 规则展开且「在眼前」时才允许收起，否则点击侧边栏始终导航过去（滚动 + 展开）。
+ * 用 getBoundingClientRect 比较，避免依赖 offsetParent 链。
+ */
+function isRuleInViewport(rule: RuleVM): boolean {
+  const el = document.getElementById(rule._key);
+  const scroll = contentEl.value;
+  if (!el || !scroll) return false;
+  const elRect = el.getBoundingClientRect();
+  const scrollRect = scroll.getBoundingClientRect();
+  return (
+    elRect.top >= scrollRect.top &&
+    elRect.top < scrollRect.bottom &&
+    elRect.bottom > scrollRect.top
+  );
+}
+
+/**
+ * 侧边栏点击：
+ * - 规则已展开且在可见范围内 → 收起（主动收起）。
+ * - 规则已展开但不在可见范围 → 仅滚动定位，保持展开状态。
+ * - 规则收起 → 展开并滚动定位高亮。
+ */
 async function handleNavClick(rule: RuleVM) {
   if (!isCollapsed(rule)) {
-    setRuleCollapsed(rule, true);
+    if (isRuleInViewport(rule)) {
+      setRuleCollapsed(rule, true);
+      return;
+    }
+    scrollToAndHighlight(rule._key);
     return;
   }
   setRuleCollapsed(rule, false);
@@ -403,7 +433,7 @@ watch(
         <div v-if="rules.length === 0" class="rule-nav__empty">暂无规则</div>
       </div>
     </aside>
-    <div class="container">
+    <div ref="contentEl" class="container">
       <div class="page-header">
         <div class="page-header__row">
           <h2 class="page-title">服务配置</h2>
