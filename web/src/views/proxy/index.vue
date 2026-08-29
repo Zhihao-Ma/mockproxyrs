@@ -44,18 +44,24 @@ const collapsed = ref<Record<string, boolean>>({});
 /** 内容区滚动容器引用，用于判断规则是否在当前可见范围内 */
 const contentEl = ref<HTMLElement | null>(null);
 
-/** 当前悬浮规则 URL 的提示内容：仅当 URL 被截断时赋值，空串则禁用 tooltip */
-const hoverUrl = ref("");
+/** 当前 hover 到的规则条目 key，用于只在被截断时按条目显示 tooltip */
+const hoveredKey = ref("");
 
-/** 悬浮规则条目：判断 URL 是否被截断，截断才显示完整 URL 提示 */
-function onNavItemEnter(rule: RuleVM, e: MouseEvent) {
+/** 判断规则 URL 是否已被截断（超出省略） */
+function isUrlTruncated(e: MouseEvent): boolean {
   const urlEl = (e.currentTarget as HTMLElement).querySelector<HTMLElement>(".rule-nav__url");
-  const truncated = urlEl ? urlEl.scrollWidth > urlEl.clientWidth : false;
-  hoverUrl.value = truncated ? rule.urlPattern || "" : "";
+  return urlEl ? urlEl.scrollWidth > urlEl.clientWidth : false;
+}
+
+/** 悬浮整个规则条目：URL 截断时记录该条目 key 以显示 tooltip */
+function onNavItemEnter(rule: RuleVM, e: MouseEvent) {
+  if (isUrlTruncated(e)) {
+    hoveredKey.value = rule._key;
+  }
 }
 
 function onNavItemLeave() {
-  hoverUrl.value = "";
+  hoveredKey.value = "";
 }
 
 function isCollapsed(rule: RuleVM): boolean {
@@ -459,27 +465,27 @@ watch(
     <aside v-if="layoutStore.navVisible" class="rule-nav">
       <div class="rule-nav__header">规则列表</div>
       <div class="rule-nav__body">
-        <div
+        <el-tooltip
           v-for="rule in rules"
           :key="rule._key"
-          class="rule-nav__item"
-          :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
-          @click="handleNavClick(rule)"
-          @mouseenter="onNavItemEnter(rule, $event)"
-          @mouseleave="onNavItemLeave"
+          :content="rule.urlPattern || ''"
+          :visible="hoveredKey === rule._key"
+          placement="right"
+          manual
         >
-          <span class="rule-nav__dot"></span>
-          <el-tooltip
-            :content="hoverUrl"
-            :disabled="!hoverUrl"
-            placement="right"
-            :show-after="300"
+          <div
+            class="rule-nav__item"
+            :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
+            @click="handleNavClick(rule)"
+            @mouseenter="onNavItemEnter(rule, $event)"
+            @mouseleave="onNavItemLeave"
           >
+            <span class="rule-nav__dot"></span>
             <span class="rule-nav__url">
               {{ rule.urlPattern || "(未设置 URL)" }}
             </span>
-          </el-tooltip>
-        </div>
+          </div>
+        </el-tooltip>
         <div v-if="rules.length === 0" class="rule-nav__empty">暂无规则</div>
       </div>
     </aside>
