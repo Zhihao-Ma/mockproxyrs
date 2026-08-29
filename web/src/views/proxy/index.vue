@@ -27,8 +27,50 @@ const form = reactive({
   targetUrl: "",
 });
 
-const rules = ref<MockRule[]>([]);
+/** 规则条目扩展客户端 key：已保存规则用 id，未保存新规则用临时 key（会话内稳定，不随排序/保存变化） */
+interface RuleVM extends MockRule {
+  _key: string;
+}
+
+const rules = ref<RuleVM[]>([]);
 const isRunning = ref(false);
+
+/** 折叠状态：key 为 RuleVM._key，true=收起；缺省视为展开 */
+const collapsed = ref<Record<string, boolean>>({});
+
+function isCollapsed(rule: RuleVM): boolean {
+  return collapsed.value[rule._key] === true;
+}
+
+function setRuleCollapsed(rule: RuleVM, value: boolean) {
+  collapsed.value[rule._key] = value;
+}
+
+function toggleRule(rule: RuleVM) {
+  setRuleCollapsed(rule, !isCollapsed(rule));
+}
+
+function expandAll() {
+  const next: Record<string, boolean> = {};
+  for (const r of rules.value) next[r._key] = false;
+  collapsed.value = next;
+}
+
+function collapseAll() {
+  const next: Record<string, boolean> = {};
+  for (const r of rules.value) next[r._key] = true;
+  collapsed.value = next;
+}
+
+/** 侧边栏点击：目标已展开则收起，否则展开并滚动定位高亮 */
+function handleNavClick(rule: RuleVM) {
+  if (!isCollapsed(rule)) {
+    setRuleCollapsed(rule, true);
+    return;
+  }
+  setRuleCollapsed(rule, false);
+  scrollToAndHighlight(rule._key);
+}
 
 async function handleStart() {
   await updateService({...form})
@@ -85,7 +127,8 @@ function queryTargetHistory(
 }
 
 function addNewRule() {
-  rules.value.push({
+  const key = `new-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  rules.value.unshift({
     id: "",
     serviceId: form.id,
     urlPattern: "",
@@ -97,7 +140,10 @@ function addNewRule() {
     script: null,
     delayMs: null,
     useScript: false,
+    _key: key,
   });
+  // 新增规则自动展开
+  collapsed.value[key] = false;
 }
 
 async function saveRule(index: number) {
@@ -132,6 +178,7 @@ async function saveRule(index: number) {
       useScript: rule.useScript,
     });
     rule.id = id;
+    // _key 保持会话内稳定，不随保存迁移（折叠态与 DOM id 依赖它）
   }
 }
 
@@ -238,11 +285,12 @@ async function handleDeleteRule(index: number) {
       await deleteRule(rule.id);
       rules.value.splice(index, 1);
     } catch {
-      // API 层已显示错误信息
+      return;
     }
   } else {
     rules.value.splice(index, 1);
   }
+  delete collapsed.value[rule._key];
 }
 
 async function handleClearRules() {
@@ -255,6 +303,7 @@ async function handleClearRules() {
     });
     await deleteRulesByService(form.id);
     rules.value = [];
+    collapsed.value = {};
   } catch {
     // 用户取消或 API 层已显示错误信息
   }
@@ -274,7 +323,12 @@ async function loadService(id: string) {
     rules.value = ruleList.map(r => ({
       ...r,
       useScript: r.useScript,
+      _key: r.id,
     }));
+    // 首次加载默认全部收起
+    const next: Record<string, boolean> = {};
+    for (const r of rules.value) next[r._key] = true;
+    collapsed.value = next;
   }
 }
 
@@ -300,8 +354,9 @@ onMounted(async () => {
   const ruleId = route.query.ruleId as string;
   if (id) {
     await loadService(id);
-    // 跳转到规则并高亮
+    // 跳转到规则并高亮（已保存规则的 _key 即其 id）
     if (ruleId) {
+      collapsed.value[ruleId] = false;
       scrollToAndHighlight(ruleId);
     }
   }
@@ -390,136 +445,172 @@ watch(
             <el-button type="danger" style="color: #fff;" plain :disabled="rules.length === 0" @click="handleClearRules">
               清空规则
             </el-button>
+            <el-button :disabled="rules.length === 0" @click="expandAll">
+              全部展开
+            </el-button>
+            <el-button :disabled="rules.length === 0" @click="collapseAll">
+              全部收起
+            </el-button>
             <el-button type="primary" @click="addNewRule">
               添加规则
             </el-button>
           </div>
         </div>
       </template>
-      <div class="rule-container">
-        <template v-for="(item, index) in rules" :key="item.id || index">
-          <div class="rule-card" :id="item.id">
-            <div class="rule-header">
-              <div class="rule-switches">
-                <div class="switch-item">
-                  <span class="switch-label">启用</span>
-                  <el-switch v-model="item.enabled" @change="saveRule(index)" />
-                </div>
-                <div class="switch-item">
-                  <span class="switch-label">转发并记录</span>
-                  <el-switch v-model="item.forwardAndRecord" @change="saveRule(index)" />
-                </div>
-              </div>
-              <el-button type="danger" text class="delete-btn" @click="handleDeleteRule(index)">
-                删除
-              </el-button>
-            </div>
-            <div class="rule-body">
-              <div class="form-row">
-                <div class="form-group form-group-method">
-                  <label class="form-label">方法</label>
-                  <el-select v-model="item.method" @change="saveRule(index)">
-                    <el-option
-                      v-for="opt in methodOptions"
-                      :key="opt.value"
-                      :label="opt.label"
-                      :value="opt.value"
-                    />
-                  </el-select>
-                </div>
-                <div class="form-group form-group-url">
-                  <label class="form-label">URL 匹配模式</label>
-                  <el-input
-                    v-model.trim="item.urlPattern"
-                    :placeholder="item.isRegex ? '正则表达式，如 /api/.*' : '精确匹配，如 /api/users'"
-                    @blur="saveRule(index)"
-                  >
-                    <template #suffix>
-                      <el-tooltip
-                        :content="item.isRegex ? '正则匹配（点击切换为精确匹配）' : '精确匹配（点击切换为正则匹配）'"
-                        placement="top"
-                      >
-                        <span
-                          class="regex-toggle"
-                          :class="{ active: item.isRegex }"
-                          @click="item.isRegex = !item.isRegex; saveRule(index)"
-                        >
-                          .*
-                        </span>
-                      </el-tooltip>
-                    </template>
-                  </el-input>
-                </div>
-              </div>
-              <div class="form-row">
-                <div class="form-group form-group-delay">
-                  <label class="form-label">延迟(ms)</label>
-                  <el-input-number
-                    v-model="item.delayMs"
-                    :min="0"
-                    :step="100"
-                    controls-position="right"
-                    @change="saveRule(index)"
-                  />
-                </div>
-              </div>
-              <div v-if="!usesAdvancedMock(item)" class="form-group">
-                <CodeEditor
-                  :model-value="item.mockResponse"
-                  language="json"
-                  label="Mock 响应 (JSON)"
-                  :rows="6"
-                  :preview-lines="6"
-                  placeholder='{"code": 200, "data": {}}'
-                  :formatter="formatJsonString"
-                  format-on-close
-                  dialog-title="编辑 Mock 响应"
-                  @update:model-value="(val: string) => { item.mockResponse = val }"
-                  @blur="saveRule(index)"
-                  @save="saveRule(index)"
-                />
-              </div>
-              <div class="form-group">
-                <div class="advanced-header">
-                  <div class="advanced-title">
-                    <label class="form-label">高级 Mock（JS 脚本）</label>
-                    <span
-                      class="help-icon"
-                      title="使用说明"
-                      @click="showScriptHelp"
-                    >?</span>
-                  </div>
-                  <div class="advanced-actions">
-                    <el-switch
-                      :model-value="usesAdvancedMock(item)"
-                      @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
-                    />
-                  </div>
-                </div>
-                <CodeEditor
-                  v-if="usesAdvancedMock(item)"
-                  :model-value="item.script || ''"
-                  language="javascript"
-                  :rows="8"
-                  :preview-lines="8"
-                  placeholder="return { code: 0, data: request.query };"
-                  :formatter="formatScriptString"
-                  :validator="validateScriptString"
-                  validate-text="校验语法"
-                  format-text="格式化"
-                  dialog-title="编辑高级 Mock 脚本"
-                  :help="showScriptHelp"
-                  @update:model-value="(val: string) => { item.script = val }"
-                  @blur="saveRule(index)"
-                  @save="saveRule(index)"
-                />
-              </div>
-            </div>
+      <div class="rules-layout">
+        <aside class="rules-nav">
+          <div
+            v-for="rule in rules"
+            :key="rule._key"
+            class="rules-nav__item"
+            :class="{ 'is-active': !isCollapsed(rule), 'is-enabled': rule.enabled }"
+            @click="handleNavClick(rule)"
+          >
+            <span class="rules-nav__dot"></span>
+            <span class="rules-nav__url" :title="rule.urlPattern || '(未设置 URL)'">
+              {{ rule.urlPattern || "(未设置 URL)" }}
+            </span>
           </div>
-        </template>
-        <div v-if="rules.length === 0" class="empty-state">
-          <div class="empty-icon">📝</div>
-          <div class="empty-text">暂无规则，点击上方按钮添加</div>
+          <div v-if="rules.length === 0" class="rules-nav__empty">暂无规则</div>
+        </aside>
+        <div class="rule-container">
+          <template v-for="(rule, index) in rules" :key="rule._key">
+            <div class="rule-card" :id="rule._key">
+              <!-- 收起态：折叠图标 + 启用开关 + URL -->
+              <div v-if="isCollapsed(rule)" class="rule-collapsed" @click="toggleRule(rule)">
+                <span class="rule-chevron">▸</span>
+                <el-switch v-model="rule.enabled" @change="saveRule(index)" @click.stop />
+                <span class="rule-collapsed__url">{{ rule.urlPattern || "(未设置 URL)" }}</span>
+              </div>
+
+              <!-- 展开态：完整表单 -->
+              <template v-else>
+                <div class="rule-header">
+                  <div class="rule-header__left">
+                    <span class="rule-chevron" @click="toggleRule(rule)">▾</span>
+                    <div class="rule-switches">
+                      <div class="switch-item">
+                        <span class="switch-label">启用</span>
+                        <el-switch v-model="rule.enabled" @change="saveRule(index)" />
+                      </div>
+                      <div class="switch-item">
+                        <span class="switch-label">转发并记录</span>
+                        <el-switch v-model="rule.forwardAndRecord" @change="saveRule(index)" />
+                      </div>
+                    </div>
+                  </div>
+                  <el-button type="danger" text class="delete-btn" @click="handleDeleteRule(index)">
+                    删除
+                  </el-button>
+                </div>
+                <div class="rule-body">
+                  <div class="form-row">
+                    <div class="form-group form-group-method">
+                      <label class="form-label">方法</label>
+                      <el-select v-model="rule.method" @change="saveRule(index)">
+                        <el-option
+                          v-for="opt in methodOptions"
+                          :key="opt.value"
+                          :label="opt.label"
+                          :value="opt.value"
+                        />
+                      </el-select>
+                    </div>
+                    <div class="form-group form-group-url">
+                      <label class="form-label">URL 匹配模式</label>
+                      <el-input
+                        v-model.trim="rule.urlPattern"
+                        :placeholder="rule.isRegex ? '正则表达式，如 /api/.*' : '精确匹配，如 /api/users'"
+                        @blur="saveRule(index)"
+                      >
+                        <template #suffix>
+                          <el-tooltip
+                            :content="rule.isRegex ? '正则匹配（点击切换为精确匹配）' : '精确匹配（点击切换为正则匹配）'"
+                            placement="top"
+                          >
+                            <span
+                              class="regex-toggle"
+                              :class="{ active: rule.isRegex }"
+                              @click="rule.isRegex = !rule.isRegex; saveRule(index)"
+                            >
+                              .*
+                            </span>
+                          </el-tooltip>
+                        </template>
+                      </el-input>
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group form-group-delay">
+                      <label class="form-label">延迟(ms)</label>
+                      <el-input-number
+                        v-model="rule.delayMs"
+                        :min="0"
+                        :step="100"
+                        controls-position="right"
+                        @change="saveRule(index)"
+                      />
+                    </div>
+                  </div>
+                  <div v-if="!usesAdvancedMock(rule)" class="form-group">
+                    <CodeEditor
+                      :model-value="rule.mockResponse"
+                      language="json"
+                      label="Mock 响应 (JSON)"
+                      :rows="6"
+                      :preview-lines="6"
+                      placeholder='{"code": 200, "data": {}}'
+                      :formatter="formatJsonString"
+                      format-on-close
+                      dialog-title="编辑 Mock 响应"
+                      @update:model-value="(val: string) => { rule.mockResponse = val }"
+                      @blur="saveRule(index)"
+                      @save="saveRule(index)"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <div class="advanced-header">
+                      <div class="advanced-title">
+                        <label class="form-label">高级 Mock（JS 脚本）</label>
+                        <span
+                          class="help-icon"
+                          title="使用说明"
+                          @click="showScriptHelp"
+                        >?</span>
+                      </div>
+                      <div class="advanced-actions">
+                        <el-switch
+                          :model-value="usesAdvancedMock(rule)"
+                          @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
+                        />
+                      </div>
+                    </div>
+                    <CodeEditor
+                      v-if="usesAdvancedMock(rule)"
+                      :model-value="rule.script || ''"
+                      language="javascript"
+                      :rows="8"
+                      :preview-lines="8"
+                      placeholder="return { code: 0, data: request.query };"
+                      :formatter="formatScriptString"
+                      :validator="validateScriptString"
+                      validate-text="校验语法"
+                      format-text="格式化"
+                      dialog-title="编辑高级 Mock 脚本"
+                      :help="showScriptHelp"
+                      @update:model-value="(val: string) => { rule.script = val }"
+                      @blur="saveRule(index)"
+                      @save="saveRule(index)"
+                    />
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+          <div v-if="rules.length === 0" class="empty-state">
+            <div class="empty-icon">📝</div>
+            <div class="empty-text">暂无规则，点击上方按钮添加</div>
+          </div>
         </div>
       </div>
     </el-card>
@@ -623,6 +714,115 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rules-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.rules-nav {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 640px;
+  overflow-y: auto;
+  border-radius: 12px;
+  background: #fafafa;
+  padding: 8px;
+}
+
+.rules-nav__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s ease;
+}
+
+.rules-nav__item:hover {
+  background: #f0f0f5;
+}
+
+.rules-nav__item.is-active {
+  background: #eaf2ff;
+}
+
+.rules-nav__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d2d2d7;
+  flex-shrink: 0;
+}
+
+.rules-nav__item.is-enabled .rules-nav__dot {
+  background: #34c759;
+}
+
+.rules-nav__url {
+  font-size: 13px;
+  color: #86868b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rules-nav__item.is-active .rules-nav__url {
+  color: #1d1d1f;
+  font-weight: 500;
+}
+
+.rules-nav__item.is-enabled .rules-nav__url {
+  color: #1d1d1f;
+}
+
+.rules-nav__empty {
+  padding: 12px;
+  font-size: 13px;
+  color: #c0c0c5;
+  text-align: center;
+}
+
+.rule-header__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rule-chevron {
+  width: 20px;
+  text-align: center;
+  font-size: 12px;
+  color: #86868b;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.rule-collapsed {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.rule-collapsed__url {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1d1d1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rule-card {
