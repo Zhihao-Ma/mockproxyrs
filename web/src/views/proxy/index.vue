@@ -38,6 +38,13 @@ const isRunning = ref(false);
 /** 折叠状态：key 为 RuleVM._key，true=收起；缺省视为展开 */
 const collapsed = ref<Record<string, boolean>>({});
 
+/** 规则列表侧边栏（右侧导航列）显示/隐藏 */
+const navVisible = ref(true);
+
+function toggleNav() {
+  navVisible.value = !navVisible.value;
+}
+
 function isCollapsed(rule: RuleVM): boolean {
   return collapsed.value[rule._key] === true;
 }
@@ -378,7 +385,7 @@ watch(
 
 <template>
   <main class="proxy-wrap">
-    <aside class="rule-nav">
+    <aside v-if="navVisible" class="rule-nav">
       <div class="rule-nav__header">规则列表</div>
       <div class="rule-nav__body">
         <div
@@ -398,7 +405,14 @@ watch(
     </aside>
     <div class="container">
       <div class="page-header">
-        <h2 class="page-title">服务配置</h2>
+        <div class="page-header__row">
+          <h2 class="page-title">服务配置</h2>
+          <span
+            class="nav-toggle"
+            :title="navVisible ? '隐藏规则列表' : '显示规则列表'"
+            @click="toggleNav"
+          >{{ navVisible ? '⟨' : '⟩' }}</span>
+        </div>
         <p class="page-subtitle">配置 Mock 服务的监听地址和转发规则</p>
       </div>
 
@@ -730,6 +744,33 @@ watch(
 
 .page-header {
   margin-bottom: 24px;
+}
+
+.page-header__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 规则列表侧边栏折叠/展开开关（右上角图标） */
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #86868b;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.nav-toggle:hover {
+  background: #e8e8ed;
+  color: #1d1d1f;
 }
 
 .page-title {
