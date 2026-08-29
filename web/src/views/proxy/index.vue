@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, onMounted, watch } from "vue";
+import { reactive, ref, onMounted, watch, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
@@ -63,12 +63,14 @@ function collapseAll() {
 }
 
 /** 侧边栏点击：目标已展开则收起，否则展开并滚动定位高亮 */
-function handleNavClick(rule: RuleVM) {
+async function handleNavClick(rule: RuleVM) {
   if (!isCollapsed(rule)) {
     setRuleCollapsed(rule, true);
     return;
   }
   setRuleCollapsed(rule, false);
+  // 等待展开渲染完成后再滚动，避免以收起态（更矮）的卡片定位导致头部偏移
+  await nextTick();
   scrollToAndHighlight(rule._key);
 }
 
@@ -357,6 +359,8 @@ onMounted(async () => {
     // 跳转到规则并高亮（已保存规则的 _key 即其 id）
     if (ruleId) {
       collapsed.value[ruleId] = false;
+      // 等待展开渲染完成后再滚动定位
+      await nextTick();
       scrollToAndHighlight(ruleId);
     }
   }
@@ -735,6 +739,9 @@ watch(
   border-radius: 12px;
   background: #fafafa;
   padding: 8px;
+  /* 列表较长时侧边栏跟随滚动，保持可点 */
+  position: sticky;
+  top: 16px;
 }
 
 .rules-nav__item {
