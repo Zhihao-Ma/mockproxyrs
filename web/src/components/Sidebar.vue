@@ -4,8 +4,10 @@ import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { listServices, addService } from "@/api";
 import type { MockService } from "@/types";
+import { useLayoutStore } from "@/stores";
 
 const router = useRouter();
+const layoutStore = useLayoutStore();
 const dialogVisible = ref(false);
 const services = ref<MockService[]>([]);
 
@@ -29,6 +31,22 @@ const activeMenu = computed(() => {
   }
   return '-1'
 })
+
+/**
+ * 是否在服务配置页（/proxy）：只有该页存在规则列表侧边栏，
+ * 此时才允许 navbar 收窄并与规则列表联动。
+ */
+const isProxyRoute = computed(() => route.path === "/proxy");
+
+/**
+ * navbar 收窄状态：单开关联动 —— 规则列表展开 ⇔ navbar 收窄为精简宽，
+ * 规则列表隐藏 ⇔ navbar 恢复全宽。
+ */
+const isNarrow = computed(() => isProxyRoute.value && layoutStore.navVisible);
+
+function handleToggleRules() {
+  layoutStore.toggleNav();
+}
 
 function resetForm() {
   Object.assign(form, initForm);
@@ -82,7 +100,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-aside width="240px" class="aside">
+  <el-aside :width="isNarrow ? '160px' : '240px'" class="aside" :class="{ 'is-narrow': isNarrow }">
     <div class="sidebar-header">
       <h1 class="logo">Mockproxyrs</h1>
     </div>
@@ -108,6 +126,19 @@ onMounted(() => {
           </div>
         </el-menu-item>
       </el-menu>
+    </div>
+
+    <!-- 规则列表侧边栏切换：仅在服务配置页（存在规则列表）时显示，与 navbar 宽度联动 -->
+    <div v-if="isProxyRoute" class="sidebar-footer">
+      <button
+        class="nav-toggle-btn"
+        type="button"
+        :title="layoutStore.navVisible ? '隐藏规则列表' : '显示规则列表'"
+        @click="handleToggleRules"
+      >
+        <span class="nav-toggle-btn__icon">{{ layoutStore.navVisible ? '⟨' : '⟩' }}</span>
+        <span class="nav-toggle-btn__text">规则列表</span>
+      </button>
     </div>
 
     <teleport to="body">
@@ -161,6 +192,54 @@ onMounted(() => {
   flex: 1;
   padding: 16px 12px;
   overflow-y: auto;
+}
+
+/* 收窄态：减少内边距，缩小 logo */
+.aside.is-narrow .sidebar-header {
+  padding: 24px 16px;
+}
+
+.aside.is-narrow .logo {
+  font-size: 19px;
+}
+
+.aside.is-narrow .sidebar-content {
+  padding: 16px 10px;
+}
+
+/* 底部切换按钮区 */
+.sidebar-footer {
+  padding: 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.nav-toggle-btn {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
+  cursor: pointer;
+  color: #86868b;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.nav-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1d1d1f;
+}
+
+.nav-toggle-btn__icon {
+  font-size: 16px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .section-title {

@@ -5,11 +5,13 @@ import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
 import type { MockRule, Method } from "@/types";
 import CodeEditor from "@/components/CodeEditor.vue";
+import { useLayoutStore } from "@/stores";
 import * as prettier from "prettier/standalone";
 import * as parserBabel from "prettier/plugins/babel";
 import * as estree from "prettier/plugins/estree";
 
 const route = useRoute();
+const layoutStore = useLayoutStore();
 
 /** HTTP 方法选项 */
 const methodOptions: { value: Method; label: string }[] = [
@@ -37,13 +39,6 @@ const isRunning = ref(false);
 
 /** 折叠状态：key 为 RuleVM._key，true=收起；缺省视为展开 */
 const collapsed = ref<Record<string, boolean>>({});
-
-/** 规则列表侧边栏（右侧导航列）显示/隐藏 */
-const navVisible = ref(true);
-
-function toggleNav() {
-  navVisible.value = !navVisible.value;
-}
 
 /** 内容区滚动容器引用，用于判断规则是否在当前可见范围内 */
 const contentEl = ref<HTMLElement | null>(null);
@@ -415,7 +410,7 @@ watch(
 
 <template>
   <main class="proxy-wrap">
-    <aside v-if="navVisible" class="rule-nav">
+    <aside v-if="layoutStore.navVisible" class="rule-nav">
       <div class="rule-nav__header">规则列表</div>
       <div class="rule-nav__body">
         <div
@@ -435,14 +430,7 @@ watch(
     </aside>
     <div ref="contentEl" class="container">
       <div class="page-header">
-        <div class="page-header__row">
-          <h2 class="page-title">服务配置</h2>
-          <span
-            class="nav-toggle"
-            :title="navVisible ? '隐藏规则列表' : '显示规则列表'"
-            @click="toggleNav"
-          >{{ navVisible ? '⟨' : '⟩' }}</span>
-        </div>
+        <h2 class="page-title">服务配置</h2>
         <p class="page-subtitle">配置 Mock 服务的监听地址和转发规则</p>
       </div>
 
@@ -774,33 +762,6 @@ watch(
 
 .page-header {
   margin-bottom: 24px;
-}
-
-.page-header__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* 规则列表侧边栏折叠/展开开关（右上角图标） */
-.nav-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  font-size: 16px;
-  font-weight: 500;
-  color: #86868b;
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.2s ease;
-}
-
-.nav-toggle:hover {
-  background: #e8e8ed;
-  color: #1d1d1f;
 }
 
 .page-title {
