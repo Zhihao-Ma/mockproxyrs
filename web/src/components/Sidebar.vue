@@ -33,10 +33,36 @@ const activeMenu = computed(() => {
 })
 
 /**
- * navbar 收窄状态：全局持久，跨路由保持。
- * 规则列表展开（navVisible=true）时 navbar 收窄为精简宽，两页一致，避免切换突兀。
+ * 是否在服务配置页（/proxy）：该页存在规则列表侧边栏，按钮文案为「规则列表」；
+ * 其他页（如 /network）按钮文案为「展开/收起」。
+ */
+const isProxyRoute = computed(() => route.path === "/proxy");
+
+/**
+ * navbar 收窄状态：全局持久（navVisible），跨路由保持；
+ * navVisible=true 时 navbar 收窄为精简宽，两页一致，避免切换突兀。
  */
 const isNarrow = computed(() => layoutStore.navVisible);
+
+/**
+ * 底部按钮配置：同一状态在不同页面含义不同。
+ * - 规则页：控制规则列表显隐，文案固定「规则列表」。
+ * - 其他页：控制 navbar 宽窄，navVisible=true（收窄）→「展开」，false（全宽）→「收起」。
+ */
+const toggleBtn = computed(() => {
+  if (isProxyRoute.value) {
+    return {
+      text: "规则列表",
+      icon: layoutStore.navVisible ? "⟨" : "⟩",
+      title: layoutStore.navVisible ? "隐藏规则列表" : "显示规则列表",
+    };
+  }
+  return {
+    text: layoutStore.navVisible ? "展开" : "收起",
+    icon: layoutStore.navVisible ? "⟩" : "⟨",
+    title: layoutStore.navVisible ? "展开" : "收起",
+  };
+});
 
 function handleToggleRules() {
   layoutStore.toggleNav();
@@ -122,16 +148,16 @@ onMounted(() => {
       </el-menu>
     </div>
 
-    <!-- 收起/展开按钮：全局持久，跨路由保持状态；规则页收起规则列表，其他页收起 navbar -->
+    <!-- 底部按钮：同一状态按页面区分语义（规则页=规则列表，其他页=展开/收起） -->
     <div class="sidebar-footer">
       <button
         class="nav-toggle-btn"
         type="button"
-        :title="layoutStore.navVisible ? '收起' : '展开'"
+        :title="toggleBtn.title"
         @click="handleToggleRules"
       >
-        <span class="nav-toggle-btn__icon">{{ layoutStore.navVisible ? '⟨' : '⟩' }}</span>
-        <span class="nav-toggle-btn__text">{{ layoutStore.navVisible ? '收起' : '展开' }}</span>
+        <span class="nav-toggle-btn__icon">{{ toggleBtn.icon }}</span>
+        <span class="nav-toggle-btn__text">{{ toggleBtn.text }}</span>
       </button>
     </div>
 
