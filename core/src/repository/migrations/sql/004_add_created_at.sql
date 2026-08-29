@@ -1,0 +1,1 @@
+ALTER TABLE mock_rule ADD COLUMN created_at INTEGER;

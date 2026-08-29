@@ -174,7 +174,8 @@ impl MockRepository for SqliteRepository {
         let mut stmt = conn
             .prepare(
                 "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script
-                 FROM mock_rule WHERE service_id = ?",
+                 FROM mock_rule WHERE service_id = ?
+                 ORDER BY created_at DESC, rowid DESC",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
 
@@ -247,9 +248,13 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
 
         let method = Self::method_to_string(&rule.method);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         conn.execute(
-            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script, created_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                ON CONFLICT(id) DO UPDATE SET
                    url_pattern = excluded.url_pattern,
                    is_regex = excluded.is_regex,
@@ -272,6 +277,7 @@ impl MockRepository for SqliteRepository {
                 rule.script.as_deref(),
                 rule.delay_ms.map(|v| v as i64),
                 rule.use_script as i32,
+                now_ms,
             ],
         )
         .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -379,6 +385,86 @@ mod tests {
         repo.delete_rule("rule-1").await.unwrap();
         let found = repo.get_rule("rule-1").await.unwrap();
         assert!(found.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_list_rules_order_newest_first() {
+        let repo = SqliteRepository::in_memory().unwrap();
+
+        let service = MockService::new(
+            "svc-order".to_string(),
+            "Order".to_string(),
+            "127.0.0.1:8080".to_string(),
+            "https://example.com".to_string(),
+        );
+        repo.save_service(&service).await.unwrap();
+
+        let mk_rule = |id: &str, url: &str| {
+            MockRule::new(
+                id.to_string(),
+                "svc-order".to_string(),
+                url.to_string(),
+                false,
+                Method::Get,
+                true,
+                false,
+                r#"{"code": 200}"#.to_string(),
+                None,
+                None,
+                false,
+            )
+        };
+
+        repo.save_rule(&mk_rule("rule-old", "/api/old"))
+            .await
+            .unwrap();
+        repo.save_rule(&mk_rule("rule-new", "/api/new"))
+            .await
+            .unwrap();
+
+        let rules = repo.list_rules("svc-order").await.unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].id, "rule-new");
+        assert_eq!(rules[1].id, "rule-old");
+    }
+
+    #[tokio::test]
+    async fn test_rule_update_keeps_original_order() {
+        let repo = SqliteRepository::in_memory().unwrap();
+
+        let service = MockService::new(
+            "svc-order2".to_string(),
+            "Order2".to_string(),
+            "127.0.0.1:8080".to_string(),
+            "https://example.com".to_string(),
+        );
+        repo.save_service(&service).await.unwrap();
+
+        let mk_rule = |id: &str, url: &str| {
+            MockRule::new(
+                id.to_string(),
+                "svc-order2".to_string(),
+                url.to_string(),
+                false,
+                Method::Get,
+                true,
+                false,
+                r#"{"code": 200}"#.to_string(),
+                None,
+                None,
+                false,
+            )
+        };
+
+        repo.save_rule(&mk_rule("rule-a", "/api/a")).await.unwrap();
+        repo.save_rule(&mk_rule("rule-b", "/api/b")).await.unwrap();
+
+        repo.save_rule(&mk_rule("rule-a", "/api/a2")).await.unwrap();
+
+        let rules = repo.list_rules("svc-order2").await.unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].id, "rule-b");
+        assert_eq!(rules[1].id, "rule-a");
     }
 
     #[tokio::test]
