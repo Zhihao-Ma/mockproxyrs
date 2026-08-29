@@ -872,4 +872,55 @@ mod tests {
 
         let _ = std::fs::remove_file(path);
     }
+
+    #[tokio::test]
+    async fn test_migration_backfills_created_at_for_legacy_order() {
+        let path =
+            std::env::temp_dir().join(format!("mockproxyrs-migration-{}.db", uuid::Uuid::new_v4()));
+
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                r#"
+                CREATE TABLE mock_service (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    listen_addr TEXT NOT NULL,
+                    target_url TEXT NOT NULL
+                );
+
+                CREATE TABLE mock_rule (
+                    id TEXT PRIMARY KEY,
+                    service_id TEXT NOT NULL,
+                    url_pattern TEXT NOT NULL,
+                    is_regex INTEGER NOT NULL DEFAULT 0,
+                    method TEXT NOT NULL DEFAULT 'ALL',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    forward_and_record INTEGER NOT NULL DEFAULT 0,
+                    mock_response TEXT,
+                    FOREIGN KEY (service_id) REFERENCES mock_service(id) ON DELETE CASCADE
+                );
+
+                INSERT INTO mock_service (id, name, listen_addr, target_url)
+                VALUES ('svc-1', 'Test', '127.0.0.1:8080', 'https://example.com');
+
+                INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response)
+                VALUES ('rule-old', 'svc-1', '/api/old', 0, 'GET', 1, 0, '{"code":200}');
+
+                INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response)
+                VALUES ('rule-new', 'svc-1', '/api/new', 0, 'GET', 1, 0, '{"code":200}');
+                "#,
+            )
+            .unwrap();
+        }
+
+        // 打开仓库触发迁移，回填 created_at 后应保持「后插入者在前」的确定性顺序
+        let repo = SqliteRepository::new(&path).unwrap();
+        let rules = repo.list_rules("svc-1").await.unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].id, "rule-new");
+        assert_eq!(rules[1].id, "rule-old");
+
+        let _ = std::fs::remove_file(path);
+    }
 }
