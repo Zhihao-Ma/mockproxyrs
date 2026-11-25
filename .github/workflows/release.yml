@@ -51,6 +51,12 @@ jobs:
         run: npm ci
         working-directory: desktop
 
+      # 测试版约定：tag 带预发布后缀（如 v0.4.0-beta.1、v0.4.0-rc.1）→ 发为 GitHub Pre-release，不会被标为 Latest
+      - name: Determine prerelease from tag
+        id: meta
+        shell: bash
+        run: echo "prerelease=$([[ "${GITHUB_REF_NAME}" == *-* ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -59,6 +65,7 @@ jobs:
           projectPath: "desktop"
           tagName: ${{ github.ref_name }}
           releaseName: "MockProxyRS ${{ github.ref_name }}"
+          prerelease: ${{ steps.meta.outputs.prerelease }}
           releaseBody: |
             ## MockProxyRS ${{ github.ref_name }}
 
@@ -69,29 +76,24 @@ jobs:
 
             ### 变更内容 / Changes
 
-            **规则管理 / Rule Management**
-            - 规则卡片支持折叠/展开，收起态精简展示（仅启用状态 + URL）
-              Rule cards can be collapsed/expanded; collapsed view shows only enabled state and URL
-            - 新增左侧规则导航侧边栏，按启用状态着色，点击定位到对应规则
-              New left-hand rule navigation sidebar, color-coded by enabled state, click to jump to a rule
-            - 支持全部展开/收起与全部启用/禁用
-              Added expand/collapse-all and enable/disable-all controls
-            - 规则按创建时间倒序排列（新增置顶）
-              Rules are ordered newest-first by creation time
+            **响应集 / Response Sets**
+            - 规则可保存多条命名响应，在 Mock 响应编辑器上方以 tab 展示，点击切换当前生效的响应，同一时间仅一条生效
+              Rules can store multiple named responses, shown as tabs above the mock editor; click to switch the active one (exactly one active at a time)
+            - tab 尾部「+」新增响应并自动激活；右键 tab 可重命名或删除；没有任何响应时使用规则本身的 mock 响应
+              "+" appends a new response and activates it; right-click a tab to rename or delete; with no responses the rule's own mock response is used
+            - 网络监控的「应用」按钮改为写入实际生效的响应，并保留规则的脚本、延迟等其它设置
+              The network monitor "apply" action now writes to the effective response and preserves the rule's other settings
 
-            **编辑器 / Editor**
-            - JSON 与 JS 脚本编辑器升级为 CodeMirror 6，支持花括号/函数体折叠
-              JSON and JS editors upgraded to CodeMirror 6 with brace/function folding
+            **MCP 服务器 / MCP Server**
+            - 内置 MCP（Model Context Protocol）服务器，AI 客户端可查询服务、对规则与响应集增删改查，变更对运行中的代理服务即时生效
+              Built-in MCP server: AI clients can list services and manage rules & response sets; changes apply to running proxies immediately
+            - 侧边栏底部新增「MCP」入口：启停服务器、设置端口（默认 27120）、随应用自动启动、一键复制 HTTP / stdio 客户端配置
+              New "MCP" entry in the sidebar: start/stop, port (default 27120), auto-start with the app, copy HTTP / stdio client config
+            - 新增 stdio 桥接程序 `mockproxyrs-mcp`（需自行 `cargo build -p mockproxyrs-mcp`），供只支持子进程方式的客户端使用
+              New stdio bridge `mockproxyrs-mcp` (build with `cargo build -p mockproxyrs-mcp`) for clients that only support subprocess servers
 
-            **网络监控 / Network Monitoring**
-            - 响应体 JSON 自动格式化展示
-              JSON response bodies are auto-formatted
-            - 请求详情新增请求头、响应头与 Payload 展示
-              Request detail now shows request headers, response headers, and payload
-
-            **桌面 / Desktop**
-            - 默认窗口宽度调整为 1000px
-              Default window width increased to 1000px
+            **规则列表 / Rule List**
+            - 规则 URL 超长时改为开头省略，完整展示尾部
+              Overlong rule URLs now ellipsize at the start, keeping the tail visible
           releaseDraft: false
-          prerelease: false
           includeDebug: false
