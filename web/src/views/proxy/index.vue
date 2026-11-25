@@ -809,6 +809,9 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 翻转省略方向：尾部完整展示，开头用省略号代替 */
+  direction: rtl;
+  text-align: left;
 }
 
 .rule-nav__item.is-active .rule-nav__url {
@@ -978,6 +981,9 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 翻转省略方向：尾部完整展示，开头用省略号代替 */
+  direction: rtl;
+  text-align: left;
 }
 
 .rule-card {
