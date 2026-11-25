@@ -8,3 +8,4 @@ export function setupStore(app: import("vue").App) {
 
 export { pinia };
 export { useLayoutStore } from "./layout";
+export { useMcpStore } from "./mcp";

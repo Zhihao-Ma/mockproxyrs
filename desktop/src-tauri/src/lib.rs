@@ -98,6 +98,10 @@ pub fn run() {
             destroy_channel,
             // 脚本校验
             validate_script,
+            // MCP 服务器
+            start_mcp_server,
+            stop_mcp_server,
+            get_mcp_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,8 +26,9 @@ use tokio::sync::RwLock;
 
 use mockproxyrs_core::domain::ResponseEvent;
 use mockproxyrs_core::event::EventEmitter;
+use mockproxyrs_core::mcp::McpHttpServer;
 use mockproxyrs_core::mock::ScriptEngine;
-use mockproxyrs_core::proxy::ProxyServer;
+use mockproxyrs_core::proxy::{ProxyServer, RuleStore};
 use mockproxyrs_core::repository::SqliteRepository;
 
 /// 应用全局状态
@@ -42,6 +43,8 @@ pub struct AppState {
     pub event_channel: Arc<RwLock<Option<Channel<ResponseEvent>>>>,
     /// JS 脚本引擎
     pub script_engine: Arc<ScriptEngine>,
+    /// 运行中的 MCP 服务器句柄
+    pub mcp_server: Arc<RwLock<Option<McpHttpServer>>>,
 }
 
 impl AppState {
@@ -52,6 +55,7 @@ impl AppState {
             repository: Arc::new(repository),
             script_engine: Arc::new(script_engine),
             event_channel: Arc::new(RwLock::new(None)),
+            mcp_server: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -59,6 +63,13 @@ impl AppState {
     pub async fn is_service_running(&self, id: &str) -> bool {
         let services = self.services.read().await;
         services.contains_key(id)
+    }
+
+    /// 规则与服务的统一存取入口
+    ///
+    /// 与运行中的服务表共享同一份 `Arc`，规则变更会立即同步到运行中的代理服务。
+    pub fn rule_store(&self) -> RuleStore {
+        RuleStore::new(self.repository.clone(), self.services.clone())
     }
 }
 

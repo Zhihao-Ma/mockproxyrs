@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::state::{AppState, TauriChannelEmitter};
 use mockproxyrs_core::domain::{
     Method, MockRule, MockRuleDTO, MockService, MockServiceDetail, ResponseEvent, ServiceStatus,
+    UpdateRuleParams,
 };
 use mockproxyrs_core::proxy::{ProxyServer, RuleMatcher};
 use mockproxyrs_core::MockRepository;
@@ -222,10 +223,10 @@ pub async fn list_rules(
 pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     let is_regex = params.is_regex.unwrap_or(false);
-    let rule = MockRule::new(
+    let mut rule = MockRule::new(
         id.clone(),
-        params.service_id.expect("service_id expect!"),
-        params.url_pattern.expect("url_pattern expect!"),
+        params.service_id.ok_or("service_id 不能为空")?,
+        params.url_pattern.ok_or("url_pattern 不能为空")?,
         is_regex,
         parse_method(&params.method.unwrap_or_default()),
         params.enabled.unwrap_or(false),
@@ -236,17 +237,15 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
         params.use_script.unwrap_or(false),
     );
 
+    // 设置响应变体
+    rule.response_variants = params.response_variants.unwrap_or_default();
+    rule.selected_variant_id = params.selected_variant_id;
+
     state
-        .repository
-        .save_rule(&rule)
+        .rule_store()
+        .save_rule(rule)
         .await
         .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&rule.service_id) {
-        running.add_rule(rule).await;
-    }
 
     Ok(id)
 }
@@ -254,44 +253,30 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
 /// 更新规则
 #[tauri::command]
 pub async fn update_rule(
-    id: String,
-    service_id: String,
-    url_pattern: String,
-    is_regex: bool,
-    method: String,
-    enabled: bool,
-    forward_and_record: bool,
-    mock_response: String,
-    script: Option<String>,
-    delay_ms: Option<u64>,
-    use_script: bool,
+    params: UpdateRuleParams,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let rule = MockRule::new(
-        id.clone(),
-        service_id.clone(),
-        url_pattern,
-        is_regex,
-        parse_method(&method),
-        enabled,
-        forward_and_record,
-        mock_response,
-        script.filter(|s| !s.is_empty()),
-        delay_ms,
-        use_script,
+    let mut rule = MockRule::new(
+        params.id,
+        params.service_id,
+        params.url_pattern,
+        params.is_regex,
+        parse_method(&params.method),
+        params.enabled,
+        params.forward_and_record,
+        params.mock_response,
+        params.script.filter(|s| !s.is_empty()),
+        params.delay_ms,
+        params.use_script,
     );
+    rule.response_variants = params.response_variants;
+    rule.selected_variant_id = params.selected_variant_id;
 
     state
-        .repository
-        .save_rule(&rule)
+        .rule_store()
+        .save_rule(rule)
         .await
         .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&service_id) {
-        running.update_rule(rule).await;
-    }
 
     Ok(())
 }
@@ -310,29 +295,11 @@ fn parse_method(s: &str) -> Method {
 /// 删除规则
 #[tauri::command]
 pub async fn delete_rule(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    // 先获取规则信息
-    let rule = state
-        .repository
-        .get_rule(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("规则不存在")?;
-
-    let service_id = rule.service_id.clone();
-
     state
-        .repository
+        .rule_store()
         .delete_rule(&id)
         .await
-        .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&service_id) {
-        running.delete_rule(&id).await;
-    }
-
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// 删除服务的所有规则

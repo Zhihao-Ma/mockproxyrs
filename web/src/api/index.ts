@@ -25,6 +25,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Channel } from "@tauri-apps/api/core";
 import { ElMessage } from "element-plus";
 import type {
+  McpStatus,
   MockService,
   MockServiceDetail,
   MockRule,
@@ -139,4 +140,21 @@ export async function createChannel(onMessage: (event: ResponseEvent) => void): 
 /** 销毁事件通道 */
 export function destroyChannel(): Promise<void> {
   return request<void>("destroy_channel");
+}
+
+// ==================== MCP 服务器 ====================
+
+/** 获取 MCP 服务器状态 */
+export function getMcpStatus(): Promise<McpStatus> {
+  return request<McpStatus>("get_mcp_status");
+}
+
+/** 启动 MCP 服务器（端口缺省时由后端使用默认端口） */
+export function startMcpServer(port?: number): Promise<McpStatus> {
+  return request<McpStatus>("start_mcp_server", { port: port ?? null });
+}
+
+/** 停止 MCP 服务器 */
+export function stopMcpServer(): Promise<void> {
+  return request<void>("stop_mcp_server");
 }

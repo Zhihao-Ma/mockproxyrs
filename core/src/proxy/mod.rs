@@ -11,9 +11,11 @@
 
 mod client;
 mod matcher;
+mod rule_store;
 mod server;
 
 pub use client::UpstreamClient;
 pub use matcher::CompiledRule;
 pub use matcher::RuleMatcher;
+pub use rule_store::RuleStore;
 pub use server::ProxyServer;

@@ -19,6 +19,7 @@
 pub mod domain;
 pub mod error;
 pub mod event;
+pub mod mcp;
 pub mod mock;
 pub mod proxy;
 pub mod repository;
@@ -28,4 +29,5 @@ pub use domain::{MockResponseVariant, MockRule, MockService, ResponseEvent, Serv
 pub use error::{MockproxyrsError, Result};
 pub use event::EventEmitter;
 pub use mock::{RequestContext, ScriptEngine, ScriptMockResponse, execute_script};
+pub use proxy::RuleStore;
 pub use repository::MockRepository;

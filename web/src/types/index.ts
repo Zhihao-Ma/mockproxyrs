@@ -102,6 +102,16 @@ export interface ServiceStatus {
 }
 
 /**
+ * MCP 服务器状态
+ */
+export interface McpStatus {
+  running: boolean;
+  port: number | null;
+  /** AI 客户端配置用的完整地址，如 "http://127.0.0.1:27120/mcp" */
+  url: string | null;
+}
+
+/**
  * 响应事件（从后端推送）
  */
 export interface ResponseEvent {
