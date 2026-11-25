@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, watch, nextTick } from "vue";
+import { reactive, ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
-import type { MockRule, Method } from "@/types";
+import type { MockRule, Method, ResponseVariant } from "@/types";
 import CodeEditor from "@/components/CodeEditor.vue";
 import { useLayoutStore } from "@/stores";
 import * as prettier from "prettier/standalone";
@@ -226,6 +226,8 @@ function addNewRule() {
     script: null,
     delayMs: null,
     useScript: false,
+    responseVariants: [],
+    selectedVariantId: null,
     _key: key,
   });
   // 新增规则自动展开
@@ -249,6 +251,8 @@ async function saveRule(index: number) {
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
       useScript: rule.useScript,
+      responseVariants: rule.responseVariants,
+      selectedVariantId: rule.selectedVariantId,
     });
   } else {
     const id = await addRule({
@@ -262,9 +266,130 @@ async function saveRule(index: number) {
       script: rule.script || null,
       delayMs: rule.delayMs ?? null,
       useScript: rule.useScript,
+      responseVariants: rule.responseVariants,
+      selectedVariantId: rule.selectedVariantId,
     });
     rule.id = id;
     // _key 保持会话内稳定，不随保存迁移（折叠态与 DOM id 依赖它）
+  }
+}
+
+// ==================== 响应集管理 ====================
+
+/** 获取规则当前激活的响应变体，无变体或未选中时返回 null */
+function getActiveVariant(rule: RuleVM): ResponseVariant | null {
+  if (!rule.selectedVariantId || rule.responseVariants.length === 0) return null;
+  return rule.responseVariants.find(v => v.id === rule.selectedVariantId) || null;
+}
+
+/** 获取规则当前显示的响应内容（变体优先，回退到 mockResponse） */
+function getActiveResponse(rule: RuleVM): string {
+  const variant = getActiveVariant(rule);
+  return variant ? variant.mockResponse : rule.mockResponse;
+}
+
+/** 设置规则当前显示的响应内容 */
+function setActiveResponse(rule: RuleVM, val: string) {
+  const variant = getActiveVariant(rule);
+  if (variant) {
+    variant.mockResponse = val;
+  } else {
+    rule.mockResponse = val;
+  }
+}
+
+/** 选中某个响应变体 */
+function selectVariant(rule: RuleVM, variantId: string) {
+  rule.selectedVariantId = variantId;
+  saveRule(rules.value.indexOf(rule));
+}
+
+/** 响应变体右键菜单状态：记录正在操作的规则、变体与菜单位置 */
+const variantMenu = reactive<{
+  visible: boolean;
+  rule: RuleVM | null;
+  variantId: string;
+  x: number;
+  y: number;
+}>({ visible: false, rule: null, variantId: "", x: 0, y: 0 });
+
+/** 右键点击响应变体 tab：打开重命名/删除菜单 */
+function openVariantMenu(rule: RuleVM, variantId: string, e: MouseEvent) {
+  variantMenu.visible = true;
+  variantMenu.rule = rule;
+  variantMenu.variantId = variantId;
+  variantMenu.x = e.clientX;
+  variantMenu.y = e.clientY;
+}
+
+function closeVariantMenu() {
+  variantMenu.visible = false;
+}
+
+/** 菜单中的重命名操作 */
+function menuRenameVariant() {
+  if (variantMenu.rule) {
+    renameVariant(variantMenu.rule, variantMenu.variantId);
+  }
+  closeVariantMenu();
+}
+
+/** 菜单中的删除操作 */
+function menuDeleteVariant() {
+  if (variantMenu.rule) {
+    deleteVariant(variantMenu.rule, variantMenu.variantId);
+  }
+  closeVariantMenu();
+}
+
+/** 新增响应变体 */
+async function addVariant(rule: RuleVM) {
+  const id = crypto.randomUUID();
+  rule.responseVariants.push({
+    id,
+    ruleId: rule.id,
+    name: `响应 ${rule.responseVariants.length + 1}`,
+    // 以当前生效的内容为起点，便于在其基础上修改
+    mockResponse: getActiveResponse(rule) || "{}",
+  });
+  rule.selectedVariantId = id;
+  await saveRule(rules.value.indexOf(rule));
+}
+
+/** 重命名响应变体 */
+function renameVariant(rule: RuleVM, variantId: string) {
+  const variant = rule.responseVariants.find(v => v.id === variantId);
+  if (!variant) return;
+  ElMessageBox.prompt('请输入新名称', '重命名', {
+    inputValue: variant.name,
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+  }).then(({ value }) => {
+    if (value) {
+      variant.name = value;
+      saveRule(rules.value.indexOf(rule));
+    }
+  }).catch(() => {});
+}
+
+/** 删除响应变体 */
+async function deleteVariant(rule: RuleVM, variantId: string) {
+  const variant = rule.responseVariants.find(v => v.id === variantId);
+  if (!variant) return;
+  try {
+    await ElMessageBox.confirm(`确定删除响应 "${variant.name}" 吗？此操作不可撤销。`, '删除确认', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    });
+    const idx = rule.responseVariants.indexOf(variant);
+    rule.responseVariants.splice(idx, 1);
+    if (rule.selectedVariantId === variantId) {
+      rule.selectedVariantId = rule.responseVariants.length > 0 ? rule.responseVariants[0].id : null;
+    }
+    await saveRule(rules.value.indexOf(rule));
+  } catch {
+    // 用户取消
   }
 }
 
@@ -409,6 +534,8 @@ async function loadService(id: string) {
     rules.value = ruleList.map(r => ({
       ...r,
       useScript: r.useScript,
+      responseVariants: r.responseVariants ?? [],
+      selectedVariantId: r.selectedVariantId ?? null,
       _key: r.id,
     }));
     // 首次加载默认全部收起
@@ -436,6 +563,10 @@ function scrollToAndHighlight(id: string) {
 }
 
 onMounted(async () => {
+  // 全局点击/滚动时关闭响应集右键菜单
+  document.addEventListener('click', closeVariantMenu);
+  document.addEventListener('scroll', closeVariantMenu, true);
+
   const id = route.query.id as string;
   const ruleId = route.query.ruleId as string;
   if (id) {
@@ -448,6 +579,11 @@ onMounted(async () => {
       scrollToAndHighlight(ruleId);
     }
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeVariantMenu);
+  document.removeEventListener('scroll', closeVariantMenu, true);
 });
 
 watch(
@@ -665,17 +801,46 @@ watch(
                     </div>
                   </div>
                   <div v-if="!usesAdvancedMock(rule)" class="form-group">
+                    <!-- 响应集 tab 条：有多条命名响应时展示，点击切换激活 -->
+                    <div v-if="rule.responseVariants.length > 0" class="variant-tabs">
+                      <div
+                        v-for="variant in rule.responseVariants"
+                        :key="variant.id"
+                        class="variant-tab"
+                        :class="{ 'is-active': rule.selectedVariantId === variant.id }"
+                        @click="selectVariant(rule, variant.id)"
+                        @contextmenu.prevent="openVariantMenu(rule, variant.id, $event)"
+                      >
+                        {{ variant.name }}
+                      </div>
+                      <div
+                        class="variant-tab variant-tab--add"
+                        title="新增响应"
+                        @click="addVariant(rule)"
+                      >
+                        +
+                      </div>
+                    </div>
+                    <div v-else class="variant-tabs">
+                      <div
+                        class="variant-tab variant-tab--add"
+                        title="新增响应"
+                        @click="addVariant(rule)"
+                      >
+                        + 响应集
+                      </div>
+                    </div>
                     <CodeEditor
-                      :model-value="rule.mockResponse"
+                      :model-value="getActiveResponse(rule)"
                       language="json"
-                      label="Mock 响应 (JSON)"
+                      :label="rule.responseVariants.length > 0 ? `Mock 响应 (JSON) — ${getActiveVariant(rule)?.name || '默认'}` : 'Mock 响应 (JSON)'"
                       :rows="6"
                       :preview-lines="6"
                       placeholder='{"code": 200, "data": {}}'
                       :formatter="formatJsonString"
                       format-on-close
                       dialog-title="编辑 Mock 响应"
-                      @update:model-value="(val: string) => { rule.mockResponse = val }"
+                      @update:model-value="(val: string) => { setActiveResponse(rule, val) }"
                       @blur="saveRule(index)"
                       @save="saveRule(index)"
                     />
@@ -726,6 +891,17 @@ watch(
         </div>
     </el-card>
     </div>
+    <!-- 响应集 tab 右键菜单：重命名 / 删除 -->
+    <Teleport to="body">
+      <div
+        v-if="variantMenu.visible"
+        class="variant-context-menu"
+        :style="{ left: variantMenu.x + 'px', top: variantMenu.y + 'px' }"
+      >
+        <div class="variant-context-menu__item" @click="menuRenameVariant">重命名</div>
+        <div class="variant-context-menu__item variant-context-menu__item--danger" @click="menuDeleteVariant">删除</div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -1157,6 +1333,50 @@ watch(
   gap: 12px;
 }
 
+/* 响应集 tab 条 */
+.variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.variant-tab {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #86868b;
+  background: #f0f0f5;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.variant-tab:hover {
+  background: #e8e8ed;
+  color: #1d1d1f;
+}
+
+.variant-tab.is-active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+.variant-tab--add {
+  background: transparent;
+  border: 1px dashed #d2d2d7;
+  color: #86868b;
+}
+
+.variant-tab--add:hover {
+  border-color: #0071e3;
+  color: #0071e3;
+  background: transparent;
+}
+
 @keyframes highlightFlash {
   0% {
     box-shadow: 0 0 0 2px rgba(255, 255, 255, 0), inset 0 0 0 100px rgba(245, 108, 108, 0);
@@ -1206,5 +1426,38 @@ watch(
 .history-item__del:hover {
   color: #f56c6c;
   background-color: rgba(245, 108, 108, 0.1);
+}
+
+/* 响应集右键菜单：Teleport 到 body，scoped 命中不了，需全局 */
+.variant-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 120px;
+  padding: 4px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.variant-context-menu__item {
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #1d1d1f;
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.variant-context-menu__item:hover {
+  background: #f0f0f5;
+}
+
+.variant-context-menu__item--danger {
+  color: #f56c6c;
+}
+
+.variant-context-menu__item--danger:hover {
+  background: rgba(245, 108, 108, 0.1);
 }
 </style>

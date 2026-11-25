@@ -173,7 +173,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script, response_variants, selected_variant_id
                  FROM mock_rule WHERE service_id = ?
                  ORDER BY created_at DESC, rowid DESC",
             )
@@ -186,6 +186,10 @@ impl MockRepository for SqliteRepository {
                 let enabled: i32 = row.get(5)?;
                 let forward_and_record: i32 = row.get(6)?;
                 let use_script: i32 = row.get(10)?;
+                let response_variants_json: String = row.get::<_, String>(11).unwrap_or_default();
+                let selected_variant_id: Option<String> = row.get(12)?;
+                let response_variants =
+                    serde_json::from_str(&response_variants_json).unwrap_or_default();
                 Ok(MockRule {
                     id: row.get(0)?,
                     service_id: row.get(1)?,
@@ -198,6 +202,8 @@ impl MockRepository for SqliteRepository {
                     script: row.get(8)?,
                     delay_ms: row.get(9)?,
                     use_script: use_script != 0,
+                    response_variants,
+                    selected_variant_id,
                 })
             })
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?
@@ -211,7 +217,7 @@ impl MockRepository for SqliteRepository {
         let conn = self.get_conn()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script
+                "SELECT id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script, response_variants, selected_variant_id
                  FROM mock_rule WHERE id = ?",
             )
             .map_err(|e| MockproxyrsError::Database(e.to_string()))?;
@@ -223,6 +229,10 @@ impl MockRepository for SqliteRepository {
                 let enabled: i32 = row.get(5)?;
                 let forward_and_record: i32 = row.get(6)?;
                 let use_script: i32 = row.get(10)?;
+                let response_variants_json: String = row.get::<_, String>(11).unwrap_or_default();
+                let selected_variant_id: Option<String> = row.get(12)?;
+                let response_variants =
+                    serde_json::from_str(&response_variants_json).unwrap_or_default();
                 Ok(MockRule {
                     id: row.get(0)?,
                     service_id: row.get(1)?,
@@ -235,6 +245,8 @@ impl MockRepository for SqliteRepository {
                     script: row.get(8)?,
                     delay_ms: row.get(9)?,
                     use_script: use_script != 0,
+                    response_variants,
+                    selected_variant_id,
                 })
             })
             .optional()
@@ -253,8 +265,8 @@ impl MockRepository for SqliteRepository {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         conn.execute(
-            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script, created_at)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            r#"INSERT INTO mock_rule (id, service_id, url_pattern, is_regex, method, enabled, forward_and_record, mock_response, script, delay_ms, use_script, response_variants, selected_variant_id, created_at)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                ON CONFLICT(id) DO UPDATE SET
                    url_pattern = excluded.url_pattern,
                    is_regex = excluded.is_regex,
@@ -264,7 +276,9 @@ impl MockRepository for SqliteRepository {
                    mock_response = excluded.mock_response,
                    script = excluded.script,
                    delay_ms = excluded.delay_ms,
-                   use_script = excluded.use_script"#,
+                   use_script = excluded.use_script,
+                   response_variants = excluded.response_variants,
+                   selected_variant_id = excluded.selected_variant_id"#,
             params![
                 rule.id,
                 rule.service_id,
@@ -277,6 +291,8 @@ impl MockRepository for SqliteRepository {
                 rule.script.as_deref(),
                 rule.delay_ms.map(|v| v as i64),
                 rule.use_script as i32,
+                serde_json::to_string(&rule.response_variants).unwrap_or_default(),
+                rule.selected_variant_id.as_deref(),
                 now_ms,
             ],
         )
@@ -312,6 +328,7 @@ impl MockRepository for SqliteRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::MockResponseVariant;
 
     #[tokio::test]
     async fn test_service_crud() {
@@ -851,6 +868,12 @@ mod tests {
         let rule = repo.get_rule("rule-1").await.unwrap().unwrap();
         assert_eq!(rule.script, None);
         assert_eq!(rule.delay_ms, None);
+        // 响应集列在迁移 005 中加入，存量规则应得到安全的缺省值
+        assert!(
+            rule.response_variants.is_empty(),
+            "存量规则迁移后无响应变体"
+        );
+        assert_eq!(rule.selected_variant_id, None);
 
         let updated = MockRule::new(
             "rule-1".to_string(),
@@ -871,6 +894,65 @@ mod tests {
         assert_eq!(found.delay_ms, Some(250));
 
         let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn test_rule_response_variants_roundtrip() {
+        let repo = SqliteRepository::in_memory().unwrap();
+        repo.save_service(&MockService::new(
+            "svc-1".to_string(),
+            "Test".to_string(),
+            "127.0.0.1:8080".to_string(),
+            "https://example.com".to_string(),
+        ))
+        .await
+        .unwrap();
+
+        let mut rule = MockRule::new(
+            "rule-1".to_string(),
+            "svc-1".to_string(),
+            "/api/test".to_string(),
+            false,
+            Method::Get,
+            true,
+            false,
+            "{\"code\":200}".to_string(),
+            None,
+            None,
+            false,
+        );
+        rule.response_variants = vec![
+            MockResponseVariant {
+                id: "v1".to_string(),
+                rule_id: "rule-1".to_string(),
+                name: "成功".to_string(),
+                mock_response: "{\"ok\":true}".to_string(),
+            },
+            MockResponseVariant {
+                id: "v2".to_string(),
+                rule_id: "rule-1".to_string(),
+                name: "失败".to_string(),
+                mock_response: "{\"ok\":false}".to_string(),
+            },
+        ];
+        rule.selected_variant_id = Some("v2".to_string());
+        repo.save_rule(&rule).await.unwrap();
+
+        // list_rules 与 get_rule 两条读取路径都应完整还原响应集
+        let listed = repo.list_rules("svc-1").await.unwrap();
+        assert_eq!(listed, vec![rule.clone()]);
+        let got = repo.get_rule("rule-1").await.unwrap().unwrap();
+        assert_eq!(got, rule);
+        assert_eq!(got.effective_mock_response(), "{\"ok\":false}");
+
+        // UPSERT 更新：切换选中项并删掉一个变体
+        let mut updated = rule.clone();
+        updated.response_variants.remove(0);
+        updated.selected_variant_id = Some("v2".to_string());
+        repo.save_rule(&updated).await.unwrap();
+        let got = repo.get_rule("rule-1").await.unwrap().unwrap();
+        assert_eq!(got, updated);
+        assert_eq!(got.response_variants.len(), 1);
     }
 
     #[tokio::test]

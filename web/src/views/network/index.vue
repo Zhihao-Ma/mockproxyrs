@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
-import { createChannel, destroyChannel, addRule, updateRule } from "@/api";
+import { createChannel, destroyChannel, addRule, updateRule, listRules } from "@/api";
 import { useNetworkStore } from "@/stores/network";
 import { storeToRefs } from "pinia";
 import type { ResponseEvent } from "@/types";
@@ -68,15 +68,22 @@ async function applyRule(row: ResponseEvent) {
     // row 是 logData 中对应项的引用（slice/filter 共享元素引用），直接赋值即可同步更新。
     row.matchedRuleId = ruleId;
   } else {
+    // 以已保存的规则为基底更新，避免把响应集、脚本、延迟等本操作不涉及的字段冲掉
+    const existing = (await listRules(row.serviceId)).find((r) => r.id === row.matchedRuleId);
+    if (!existing) return;
+    // 写入实际生效的那条响应：有激活的变体则更新变体，否则更新规则本身的 mockResponse
+    const activeVariant = existing.responseVariants.find((v) => v.id === existing.selectedVariantId);
+    const responseVariants = activeVariant
+      ? existing.responseVariants.map((v) =>
+          v.id === activeVariant.id ? { ...v, mockResponse: row.responseBody } : v,
+        )
+      : existing.responseVariants;
     await updateRule({
-      id: row.matchedRuleId,
-      serviceId: row.serviceId,
-      urlPattern: row.urlPattern,
-      isRegex: row.isRegex,
-      method: row.method,
+      ...existing,
       enabled: true,
       forwardAndRecord: true,
-      mockResponse: row.responseBody,
+      mockResponse: activeVariant ? existing.mockResponse : row.responseBody,
+      responseVariants,
       useScript: false,
     });
   }

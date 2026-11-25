@@ -109,7 +109,7 @@ export function addRule(params: CreateRuleParams): Promise<string> {
 
 /** 更新规则 */
 export function updateRule(params: UpdateRuleParams): Promise<void> {
-  return request<void>("update_rule", { ...params });
+  return request<void>("update_rule", { params });
 }
 
 /** 删除规则 */

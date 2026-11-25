@@ -18,6 +18,19 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Mock 响应变体（响应集管理）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MockResponseVariant {
+    pub id: String,
+    /// 所属规则 ID
+    pub rule_id: String,
+    /// 变体名称（用户可辨识的标签）
+    pub name: String,
+    /// 响应体内容
+    pub mock_response: String,
+}
+
 /// Mock 服务配置（持久化）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -142,6 +155,12 @@ pub struct MockRule {
     /// 是否启用脚本执行（true=执行 script 生成响应，false=使用静态 mock_response）
     #[serde(default)]
     pub use_script: bool,
+    /// 响应变体列表（响应集管理）
+    #[serde(default)]
+    pub response_variants: Vec<MockResponseVariant>,
+    /// 当前选中的响应变体 ID，None 表示使用规则本身的 mock_response
+    #[serde(default)]
+    pub selected_variant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -171,6 +190,43 @@ pub struct MockRuleDTO {
     /// 是否启用脚本执行
     #[serde(default)]
     pub use_script: Option<bool>,
+    /// 响应变体列表
+    #[serde(default)]
+    pub response_variants: Option<Vec<MockResponseVariant>>,
+    /// 当前选中的响应变体 ID
+    #[serde(default)]
+    pub selected_variant_id: Option<String>,
+}
+
+/// 更新规则的参数（IPC 契约，字段与前端 `UpdateRuleParams` 一致）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRuleParams {
+    pub id: String,
+    pub service_id: String,
+    /// URL 匹配模式
+    pub url_pattern: String,
+    /// 是否为正则匹配（true=正则匹配，false=精确匹配）
+    pub is_regex: bool,
+    /// HTTP 方法字符串（ALL/GET/POST/PUT/DELETE，大小写不敏感）
+    pub method: String,
+    /// 是否启用 mock
+    pub enabled: bool,
+    /// 是否转发并记录
+    pub forward_and_record: bool,
+    /// mock 响应内容
+    pub mock_response: String,
+    /// JS 脚本内容（为空则使用静态 mock_response）
+    pub script: Option<String>,
+    /// 延迟响应毫秒数
+    pub delay_ms: Option<u64>,
+    /// 是否启用脚本执行
+    pub use_script: bool,
+    /// 响应变体列表
+    #[serde(default)]
+    pub response_variants: Vec<MockResponseVariant>,
+    /// 当前选中的响应变体 ID
+    pub selected_variant_id: Option<String>,
 }
 
 impl MockRule {
@@ -199,7 +255,22 @@ impl MockRule {
             script,
             delay_ms,
             use_script,
+            response_variants: Vec::new(),
+            selected_variant_id: None,
         }
+    }
+
+    /// 当前生效的静态 mock 响应
+    ///
+    /// 选中了响应变体（`selected_variant_id` 指向存在的变体）则返回变体内容，
+    /// 否则回退到规则本身的 `mock_response`；选中的变体已被删除时同样回退。
+    pub fn effective_mock_response(&self) -> String {
+        if let Some(variant_id) = &self.selected_variant_id
+            && let Some(variant) = self.response_variants.iter().find(|v| &v.id == variant_id)
+        {
+            return variant.mock_response.clone();
+        }
+        self.mock_response.clone()
     }
 }
 
@@ -567,8 +638,91 @@ mod tests {
         let rule: MockRule = serde_json::from_str(json).unwrap();
         assert_eq!(rule.script, None);
         assert_eq!(rule.delay_ms, None);
+        // 响应集字段缺省：无变体、未选中
+        assert!(rule.response_variants.is_empty());
+        assert_eq!(rule.selected_variant_id, None);
 
         let json = serde_json::to_string(&rule).unwrap();
+        let parsed: MockRule = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, rule);
+    }
+
+    fn variant(id: &str, body: &str) -> MockResponseVariant {
+        MockResponseVariant {
+            id: id.to_string(),
+            rule_id: "rule-1".to_string(),
+            name: format!("变体 {}", id),
+            mock_response: body.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_effective_mock_response_without_variants() {
+        let rule = MockRule::new(
+            "rule-1".into(),
+            "svc".into(),
+            "/a".into(),
+            false,
+            Method::Get,
+            true,
+            false,
+            "base".into(),
+            None,
+            None,
+            false,
+        );
+        assert_eq!(rule.effective_mock_response(), "base");
+    }
+
+    #[test]
+    fn test_effective_mock_response_uses_selected_variant() {
+        let mut rule = MockRule::new(
+            "rule-1".into(),
+            "svc".into(),
+            "/a".into(),
+            false,
+            Method::Get,
+            true,
+            false,
+            "base".into(),
+            None,
+            None,
+            false,
+        );
+        rule.response_variants = vec![variant("v1", "one"), variant("v2", "two")];
+
+        // 有变体但未选中 → 仍用规则本身
+        assert_eq!(rule.effective_mock_response(), "base");
+
+        rule.selected_variant_id = Some("v2".into());
+        assert_eq!(rule.effective_mock_response(), "two");
+
+        // 选中的变体已不存在 → 回退，不 panic
+        rule.selected_variant_id = Some("missing".into());
+        assert_eq!(rule.effective_mock_response(), "base");
+    }
+
+    #[test]
+    fn test_mock_rule_variants_serde_roundtrip() {
+        let mut rule = MockRule::new(
+            "rule-1".into(),
+            "svc".into(),
+            "/a".into(),
+            false,
+            Method::Get,
+            true,
+            false,
+            "base".into(),
+            None,
+            None,
+            false,
+        );
+        rule.response_variants = vec![variant("v1", "one")];
+        rule.selected_variant_id = Some("v1".into());
+
+        let json = serde_json::to_string(&rule).unwrap();
+        assert!(json.contains("\"responseVariants\""));
+        assert!(json.contains("\"selectedVariantId\""));
         let parsed: MockRule = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, rule);
     }

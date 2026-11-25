@@ -24,7 +24,7 @@ pub mod proxy;
 pub mod repository;
 
 // 重导出常用类型
-pub use domain::{MockRule, MockService, ResponseEvent, ServiceStatus};
+pub use domain::{MockResponseVariant, MockRule, MockService, ResponseEvent, ServiceStatus};
 pub use error::{MockproxyrsError, Result};
 pub use event::EventEmitter;
 pub use mock::{RequestContext, ScriptEngine, ScriptMockResponse, execute_script};

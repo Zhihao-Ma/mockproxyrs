@@ -271,7 +271,7 @@ async fn handle_request(
     let is_mock = matched_rule.is_some_and(|r| r.enabled);
     let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
-    let mock_response = matched_rule.map(|r| r.mock_response.clone());
+    let mock_response = matched_rule.map(MockRule::effective_mock_response);
     let use_script = matched_rule.is_some_and(|r| r.use_script);
     let script = matched_rule
         .and_then(|r| r.script.clone())

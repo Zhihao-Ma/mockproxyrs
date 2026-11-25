@@ -48,6 +48,16 @@ export interface MockServiceDetail {
 }
 
 /**
+ * Mock 响应变体（响应集管理）
+ */
+export interface ResponseVariant {
+  id: string;
+  ruleId: string;
+  name: string;
+  mockResponse: string;
+}
+
+/**
  * HTTP 请求方法
  */
 export type Method = "ALL" | "GET" | "POST" | "PUT" | "DELETE";
@@ -76,6 +86,10 @@ export interface MockRule {
   delayMs?: number | null;
   /** 是否启用脚本执行（true=执行脚本，false=使用静态 mockResponse） */
   useScript: boolean;
+  /** 响应变体列表 */
+  responseVariants: ResponseVariant[];
+  /** 当前选中的响应变体 ID，null 表示使用规则本身的 mockResponse */
+  selectedVariantId: string | null;
 }
 
 /**
@@ -154,6 +168,8 @@ export interface CreateRuleParams {
   script?: string | null;
   delayMs?: number | null;
   useScript?: boolean;
+  responseVariants?: ResponseVariant[];
+  selectedVariantId?: string | null;
 }
 
 /**
@@ -162,8 +178,9 @@ export interface CreateRuleParams {
 export interface UpdateRuleParams {
   id: string;
   serviceId: string;
-  urlPattern: string | null;
+  urlPattern: string;
   isRegex: boolean;
+  /** HTTP 方法（ALL/GET/POST/PUT/DELETE，大小写不敏感） */
   method: Method | string;
   enabled: boolean;
   forwardAndRecord: boolean;
@@ -171,4 +188,6 @@ export interface UpdateRuleParams {
   script?: string | null;
   delayMs?: number | null;
   useScript: boolean;
+  responseVariants: ResponseVariant[];
+  selectedVariantId: string | null;
 }
