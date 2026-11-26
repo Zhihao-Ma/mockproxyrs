@@ -63,6 +63,10 @@ jobs:
             **规则列表 / Rule List**
             - 规则 URL 超长时改为开头省略，完整展示尾部
               Overlong rule URLs now ellipsize at the start, keeping the tail visible
+
+            **代理 / Proxy**
+            - 开启 Mock 且转发录制的规则，上游转发失败时改为返回 Mock 响应，不再返回 500 错误；未开启 Mock 的透传不受影响
+              Rules with mock + forward-and-record now return the mock response when the upstream forward fails instead of a 500 error; plain passthrough without mock is unchanged
           NOTES
           } > release-notes.md
 
