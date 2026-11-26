@@ -9,7 +9,71 @@ permissions:
   contents: write
 
 jobs:
+  # 先建好 release 再构建：tauri-action 只负责往现成 release 上传产物。
+  # 之前三个平台的构建 job 同时进入 tauri-action 的创建分支，在「Creating one」后
+  # 无声失败（日志无错误、release 未建成），改用 gh release create 让失败原因可见，
+  # 也消除三方竞争；同时在这里决定正式/测试版。
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub release for the tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # 幂等：重跑或重复触发时复用已有 release
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $TAG already exists, reusing it."
+            exit 0
+          fi
+
+          # 测试版约定：tag 带预发布后缀（如 v0.4.0-beta.1、v0.4.0-rc.1）→ Pre-release，不会成为 Latest
+          EXTRA=""
+          if [[ "$TAG" == *-* ]]; then
+            EXTRA="--prerelease"
+            echo "Tag has a pre-release suffix; publishing as Pre-release."
+          fi
+
+          {
+            printf '## MockProxyRS %s\n\n' "$TAG"
+            cat <<'NOTES'
+            ### 安装说明 / Installation
+            - **Windows**: 下载 `.msi` 或 `.exe` 安装包 / Download the `.msi` or `.exe` installer
+            - **macOS**: 下载 `.dmg` 或 `.app.tar.gz` / Download the `.dmg` or `.app.tar.gz`
+            - **Linux**: 下载 `.deb` 或 `.AppImage` / Download the `.deb` or `.AppImage`
+
+            ### 变更内容 / Changes
+
+            **响应集 / Response Sets**
+            - 规则可保存多条命名响应，在 Mock 响应编辑器上方以 tab 展示，点击切换当前生效的响应，同一时间仅一条生效
+              Rules can store multiple named responses, shown as tabs above the mock editor; click to switch the active one (exactly one active at a time)
+            - tab 尾部「+」新增响应并自动激活；右键 tab 可重命名或删除；没有任何响应时使用规则本身的 mock 响应
+              "+" appends a new response and activates it; right-click a tab to rename or delete; with no responses the rule's own mock response is used
+            - 网络监控的「应用」按钮改为写入实际生效的响应，并保留规则的脚本、延迟等其它设置
+              The network monitor "apply" action now writes to the effective response and preserves the rule's other settings
+
+            **MCP 服务器 / MCP Server**
+            - 内置 MCP（Model Context Protocol）服务器，AI 客户端可查询服务、对规则与响应集增删改查，变更对运行中的代理服务即时生效
+              Built-in MCP server: AI clients can list services and manage rules & response sets; changes apply to running proxies immediately
+            - 侧边栏底部新增「MCP」入口：启停服务器、设置端口（默认 27120）、随应用自动启动、一键复制 HTTP / stdio 客户端配置
+              New "MCP" entry in the sidebar: start/stop, port (default 27120), auto-start with the app, copy HTTP / stdio client config
+            - 新增 stdio 桥接程序 `mockproxyrs-mcp`（需自行 `cargo build -p mockproxyrs-mcp`），供只支持子进程方式的客户端使用
+              New stdio bridge `mockproxyrs-mcp` (build with `cargo build -p mockproxyrs-mcp`) for clients that only support subprocess servers
+
+            **规则列表 / Rule List**
+            - 规则 URL 超长时改为开头省略，完整展示尾部
+              Overlong rule URLs now ellipsize at the start, keeping the tail visible
+          NOTES
+          } > release-notes.md
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MockProxyRS $TAG" \
+            --notes-file release-notes.md \
+            $EXTRA
+
   build:
+    needs: create-release
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -51,49 +115,12 @@ jobs:
         run: npm ci
         working-directory: desktop
 
-      # 测试版约定：tag 带预发布后缀（如 v0.4.0-beta.1、v0.4.0-rc.1）→ 发为 GitHub Pre-release，不会被标为 Latest
-      - name: Determine prerelease from tag
-        id: meta
-        shell: bash
-        run: echo "prerelease=$([[ "${GITHUB_REF_NAME}" == *-* ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-
-      - name: Build and release
+      # release 已由 create-release job 建好，这里只找它并上传各平台产物
+      - name: Build and upload assets
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: "desktop"
           tagName: ${{ github.ref_name }}
-          releaseName: "MockProxyRS ${{ github.ref_name }}"
-          prerelease: ${{ steps.meta.outputs.prerelease }}
-          releaseBody: |
-            ## MockProxyRS ${{ github.ref_name }}
-
-            ### 安装说明 / Installation
-            - **Windows**: 下载 `.msi` 或 `.exe` 安装包 / Download the `.msi` or `.exe` installer
-            - **macOS**: 下载 `.dmg` 或 `.app.tar.gz` / Download the `.dmg` or `.app.tar.gz`
-            - **Linux**: 下载 `.deb` 或 `.AppImage` / Download the `.deb` or `.AppImage`
-
-            ### 变更内容 / Changes
-
-            **响应集 / Response Sets**
-            - 规则可保存多条命名响应，在 Mock 响应编辑器上方以 tab 展示，点击切换当前生效的响应，同一时间仅一条生效
-              Rules can store multiple named responses, shown as tabs above the mock editor; click to switch the active one (exactly one active at a time)
-            - tab 尾部「+」新增响应并自动激活；右键 tab 可重命名或删除；没有任何响应时使用规则本身的 mock 响应
-              "+" appends a new response and activates it; right-click a tab to rename or delete; with no responses the rule's own mock response is used
-            - 网络监控的「应用」按钮改为写入实际生效的响应，并保留规则的脚本、延迟等其它设置
-              The network monitor "apply" action now writes to the effective response and preserves the rule's other settings
-
-            **MCP 服务器 / MCP Server**
-            - 内置 MCP（Model Context Protocol）服务器，AI 客户端可查询服务、对规则与响应集增删改查，变更对运行中的代理服务即时生效
-              Built-in MCP server: AI clients can list services and manage rules & response sets; changes apply to running proxies immediately
-            - 侧边栏底部新增「MCP」入口：启停服务器、设置端口（默认 27120）、随应用自动启动、一键复制 HTTP / stdio 客户端配置
-              New "MCP" entry in the sidebar: start/stop, port (default 27120), auto-start with the app, copy HTTP / stdio client config
-            - 新增 stdio 桥接程序 `mockproxyrs-mcp`（需自行 `cargo build -p mockproxyrs-mcp`），供只支持子进程方式的客户端使用
-              New stdio bridge `mockproxyrs-mcp` (build with `cargo build -p mockproxyrs-mcp`) for clients that only support subprocess servers
-
-            **规则列表 / Rule List**
-            - 规则 URL 超长时改为开头省略，完整展示尾部
-              Overlong rule URLs now ellipsize at the start, keeping the tail visible
-          releaseDraft: false
           includeDebug: false
