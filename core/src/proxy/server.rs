@@ -341,8 +341,14 @@ async fn handle_request(
             }
             Err(e) => {
                 error!("Error forwarding request: {}", e);
-                let resp = build_error_response(&e.to_string());
-                (resp, e.to_string())
+                // 开启 mock（转发录制模式）时，上游转发失败仍应返回 mock 响应
+                if is_mock {
+                    let mock_resp = build_mock_response(&mock_response.clone().unwrap_or_default());
+                    (mock_resp, e.to_string())
+                } else {
+                    let resp = build_error_response(&e.to_string());
+                    (resp, e.to_string())
+                }
             }
         }
     } else {
@@ -549,5 +555,138 @@ mod tests {
         let body = full("test content");
         // Just verify it doesn't panic
         let _ = body;
+    }
+
+    /// 探测一个空闲的本地端口（绑定后立即释放，存在极小的竞争窗口，测试场景可接受）
+    async fn probe_free_port() -> SocketAddr {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("failed to bind probe listener");
+        let addr = listener.local_addr().expect("failed to read local addr");
+        drop(listener);
+        addr
+    }
+
+    /// 启动一个指向“必然连接失败”上游的代理服务器
+    ///
+    /// `setup` 在服务器启动前注入规则（matcher 随规则表一并构建，保持两份存储一致）。
+    /// 返回（代理地址，关闭信号发送端）。上游端口通过先绑定后释放获得，
+    /// 保证转发时连接被立即拒绝，触发转发失败分支。
+    async fn spawn_proxy_with_unreachable_upstream<F>(setup: F) -> (SocketAddr, watch::Sender<bool>)
+    where
+        F: FnOnce(&mut HashMap<String, MockRule>),
+    {
+        let proxy_addr = probe_free_port().await;
+        let upstream_addr = probe_free_port().await;
+
+        let config = MockService::new(
+            "svc-1".to_string(),
+            "test-svc".to_string(),
+            proxy_addr.to_string(),
+            format!("http://{}", upstream_addr),
+        );
+
+        let mut rules_map = HashMap::new();
+        setup(&mut rules_map);
+        let rules = Arc::new(RwLock::new(rules_map));
+        let matcher = Arc::new(RwLock::new(RuleMatcher::build(&*rules.read().await)));
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let server = ProxyServer::new(
+            config,
+            rules.clone(),
+            Arc::new(crate::event::NoopEmitter),
+            matcher,
+            Arc::new(ScriptEngine::new().expect("failed to create script engine")),
+            shutdown_tx.clone(),
+        );
+
+        tokio::spawn(async move {
+            server
+                .start(shutdown_rx)
+                .await
+                .expect("proxy server failed to start");
+        });
+
+        (proxy_addr, shutdown_tx)
+    }
+
+    /// 向代理发送 GET 请求并返回响应
+    ///
+    /// 代理端口绑定是异步的，连接失败时短暂重试。
+    async fn send_get(proxy_addr: SocketAddr, path: &str) -> Response<hyper::body::Incoming> {
+        let client =
+            hyper_util::client::legacy::Client::builder(hyper_util::rt::TokioExecutor::new())
+                .build_http::<Full<Bytes>>();
+        let uri: hyper::Uri = format!("http://{}{}", proxy_addr, path)
+            .parse()
+            .expect("invalid request uri");
+
+        let mut last_err = None;
+        for _ in 0..50 {
+            match client.get(uri.clone()).await {
+                Ok(resp) => return resp,
+                Err(e) => {
+                    last_err = Some(e);
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            }
+        }
+        panic!(
+            "proxy did not become reachable: {:?}",
+            last_err.expect("no error recorded")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_forward_error_with_mock_returns_mock_response() {
+        // 开启 mock 且转发录制：上游连接失败时仍应返回 mock 响应
+        let (proxy_addr, shutdown_tx) = spawn_proxy_with_unreachable_upstream(|rules| {
+            let rule = MockRule::new(
+                "rule-1".to_string(),
+                "svc-1".to_string(),
+                "/api/test".to_string(),
+                false,
+                crate::domain::Method::All,
+                true,
+                true,
+                r#"{"mocked":true}"#.to_string(),
+                None,
+                None,
+                false,
+            );
+            rules.insert(rule.id.clone(), rule);
+        })
+        .await;
+
+        let resp = send_get(proxy_addr, "/api/test").await;
+        assert_eq!(resp.status(), 200);
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert_eq!(body, r#"{"mocked":true}"#);
+
+        shutdown_tx.send(true).expect("failed to send shutdown");
+    }
+
+    #[tokio::test]
+    async fn test_forward_error_without_mock_returns_error_response() {
+        // 未开启 mock（纯透传）：上游连接失败时返回错误响应
+        let (proxy_addr, shutdown_tx) = spawn_proxy_with_unreachable_upstream(|_rules| {}).await;
+
+        let resp = send_get(proxy_addr, "/api/other").await;
+        assert_eq!(resp.status(), 500);
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("\"code\":500"));
+
+        shutdown_tx.send(true).expect("failed to send shutdown");
     }
 }
