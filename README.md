@@ -36,7 +36,8 @@ mockproxyrs/
 ├── desktop/        # 桌面应用 (Tauri 2)
 ├── mcp-bridge/     # MCP stdio 桥接程序 (mockproxyrs-mcp)
 ├── server/         # 独立服务器 (计划中)
-└── web/            # Web 前端 (Vue 3)
+├── web/            # Web 前端 (Vue 3)
+└── package.json    # 根目录开发入口 (npm 脚本转发，无依赖)
 ```
 
 ## 技术栈
@@ -74,8 +75,6 @@ mockproxyrs/
 ### 安装依赖
 
 ```bash
-# 安装 Rust 依赖
-
 # 安装 Web 前端依赖
 cd web && npm install
 
@@ -83,12 +82,15 @@ cd web && npm install
 cd desktop && npm install
 ```
 
+> 根目录的 `package.json` 只是开发入口（把 `npm run dev` / `npm run build` 转发到 `desktop/`），本身没有依赖，**不需要**在根目录执行 `npm install`。
+
 ### 开发模式
+
+在根目录执行：
 
 ```bash
 # 启动桌面应用 (开发模式)
-cd desktop
-npm run tauri dev
+npm run dev
 ```
 
 这将同时启动：
@@ -99,11 +101,12 @@ npm run tauri dev
 
 ```bash
 # 构建桌面应用
-cd desktop
-npm run tauri build
+npm run build
 ```
 
 构建产物位于 `desktop/src-tauri/target/release/bundle/` 目录。
+
+以上命令等价于 `cd desktop && npm run tauri dev` / `cd desktop && npm run tauri build`（旧用法仍然有效）。前端由 Tauri 的 `beforeDevCommand` / `beforeBuildCommand` 自动启动和构建，无需单独执行。
 
 ## 核心模块说明
 

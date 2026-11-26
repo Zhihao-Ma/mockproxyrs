@@ -1,0 +1,9 @@
+{
+  "name": "mockproxyrs",
+  "private": true,
+  "description": "开发入口：npm 脚本转发到 desktop/ 执行 Tauri CLI。本文件无依赖，无需在根目录执行 npm install",
+  "scripts": {
+    "dev": "npm --prefix desktop run tauri dev",
+    "build": "npm --prefix desktop run tauri build"
+  }
+}
