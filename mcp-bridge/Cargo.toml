@@ -1,0 +1,16 @@
+[package]
+name = "mockproxyrs-mcp"
+version = "0.1.0"
+edition = "2024"
+description = "Mockproxyrs MCP stdio bridge: forwards JSON-RPC between stdin/stdout and the desktop app's MCP HTTP endpoint"
+
+[[bin]]
+name = "mockproxyrs-mcp"
+path = "src/main.rs"
+
+[dependencies]
+mockproxyrs-core = { path = "../core" }
+tokio = { workspace = true }
+hyper = { workspace = true }
+http-body-util = { workspace = true }
+serde_json = { workspace = true }

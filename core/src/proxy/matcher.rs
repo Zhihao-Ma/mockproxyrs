@@ -199,7 +199,6 @@ mod tests {
             false,
             "{}".to_string(),
             None,
-            None,
             false,
         )
     }

@@ -1,2 +1,4 @@
 /target
-docs/superpowers/
+/docs/superpowers/
+# 根目录 package.json 只是脚本转发入口，无依赖；误在此执行 npm install 生成的空 lockfile 不入库
+/package-lock.json

@@ -10,4 +10,6 @@
 mod types;
 
 pub use crate::domain::ResponseEvent;
-pub use types::{EventEmitter, NoopEmitter};
+pub use types::{
+    EventEmitter, NoopEmitter, NoopRuleChangeEmitter, RuleChangeEmitter, RuleChangeEvent,
+};

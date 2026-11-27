@@ -4,10 +4,12 @@ import { useRouter, useRoute } from "vue-router";
 import { ElMessage } from "element-plus";
 import { listServices, addService } from "@/api";
 import type { MockService } from "@/types";
-import { useLayoutStore } from "@/stores";
+import { useLayoutStore, useMcpStore } from "@/stores";
+import McpDialog from "./McpDialog.vue";
 
 const router = useRouter();
 const layoutStore = useLayoutStore();
+const mcpStore = useMcpStore();
 const dialogVisible = ref(false);
 const services = ref<MockService[]>([]);
 
@@ -116,6 +118,8 @@ function handleSelect(index: string) {
 
 onMounted(() => {
   loadServices();
+  // MCP 服务器状态同步/自动开启
+  mcpStore.init();
 });
 </script>
 
@@ -151,6 +155,19 @@ onMounted(() => {
     <!-- 底部按钮：同一状态按页面区分语义（规则页=规则列表，其他页=展开/收起） -->
     <div class="sidebar-footer">
       <button
+        class="mcp-btn"
+        :class="{ 'is-running': mcpStore.running }"
+        type="button"
+        title="MCP 服务器（AI 接入）"
+        @click="mcpStore.openDialog()"
+      >
+        <span class="mcp-btn__dot"></span>
+        <span class="mcp-btn__text">MCP</span>
+        <span v-if="!isNarrow" class="mcp-btn__state">
+          {{ mcpStore.running ? `:${mcpStore.status.port}` : '未启动' }}
+        </span>
+      </button>
+      <button
         class="nav-toggle-btn"
         type="button"
         :title="toggleBtn.title"
@@ -160,6 +177,8 @@ onMounted(() => {
         <span class="nav-toggle-btn__text">{{ toggleBtn.text }}</span>
       </button>
     </div>
+
+    <McpDialog />
 
     <teleport to="body">
         <el-dialog v-model="dialogVisible" title="新建 Mock 服务" width="480px" @close="closeDialog">
@@ -231,6 +250,51 @@ onMounted(() => {
 .sidebar-footer {
   padding: 12px;
   border-top: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* MCP 状态入口 */
+.mcp-btn {
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 10px;
+  cursor: pointer;
+  color: #86868b;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.mcp-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #1d1d1f;
+}
+
+.mcp-btn__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #d2d2d7;
+  flex-shrink: 0;
+}
+
+.mcp-btn.is-running .mcp-btn__dot {
+  background: #34c759;
+  box-shadow: 0 0 6px rgba(52, 199, 89, 0.6);
+}
+
+.mcp-btn__state {
+  font-weight: 400;
+  font-size: 12px;
+  color: #86868b;
 }
 
 .nav-toggle-btn {

@@ -6,6 +6,7 @@ mod mock_config;
 mod proxy_config;
 
 pub use mock_config::{
-    Method, MockRule, MockRuleDTO, MockService, MockServiceDetail, ResponseEvent, ServiceStatus,
+    Method, MockResponseVariant, MockRule, MockRuleDTO, MockService, MockServiceDetail,
+    ResponseEvent, ResponseKind, ServiceStatus, UpdateRuleParams,
 };
 pub use proxy_config::ForwardProxyConfig;

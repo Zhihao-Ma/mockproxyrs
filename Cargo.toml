@@ -3,6 +3,7 @@ members = [
     "core",
     "desktop/src-tauri",
     "server",
+    "mcp-bridge",
 ]
 
 [workspace.dependencies]

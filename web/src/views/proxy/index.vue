@@ -1,9 +1,17 @@
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, watch, nextTick } from "vue";
+import { reactive, ref, computed, onMounted, onUnmounted, watch, nextTick } from "vue";
 import { useRoute } from "vue-router";
 import { ElMessageBox } from "element-plus";
 import { getService, listRules, updateService, startService, stopService, addRule, updateRule, deleteRule, deleteRulesByService, validateScript } from "@/api";
-import type { MockRule, Method } from "@/types";
+import {
+  addVariant as addVariantApi,
+  renameVariant as renameVariantApi,
+  updateVariant as updateVariantApi,
+  selectVariant as selectVariantApi,
+  deleteVariant as deleteVariantApi,
+  subscribeRuleChanges,
+} from "@/api";
+import type { MockRule, Method, ResponseKind, ResponseVariant, RuleChangeEvent } from "@/types";
 import CodeEditor from "@/components/CodeEditor.vue";
 import { useLayoutStore } from "@/stores";
 import * as prettier from "prettier/standalone";
@@ -33,6 +41,40 @@ const form = reactive({
 /** 规则条目扩展客户端 key：已保存规则用 id，未保存新规则用临时 key（会话内稳定，不随排序/保存变化） */
 interface RuleVM extends MockRule {
   _key: string;
+  /**
+   * 上次从后端加载或保存成功后的原始值（不含变体）。
+   * 用于两件事：脏检查（没变就不发保存）与收到规则变更事件时判断本条是否有未保存改动。
+   * 未保存的新规则为 null。
+   */
+  _snapshot: MockRule | null;
+}
+
+/** 参与脏检查与局部刷新的规则自身字段（不含变体，变体走专用接口） */
+const RULE_FIELDS = [
+  "urlPattern",
+  "isRegex",
+  "method",
+  "enabled",
+  "forwardAndRecord",
+  "mockResponse",
+  "delayMs",
+  "useScript",
+  "selectedVariantId",
+] as const satisfies readonly (keyof MockRule)[];
+
+/** 规则自身字段（含变体列表）的浅拷贝，作为快照；变体列表只用于编辑器内容比对，不参与规则字段脏检查 */
+function snapshotOf(rule: MockRule): MockRule {
+  return { ...rule, responseVariants: rule.responseVariants.map((v) => ({ ...v })) };
+}
+
+/** 两条规则在自身字段上是否一致（忽略变体列表内容，变体由后端维护） */
+function ruleFieldsEqual(a: MockRule, b: MockRule): boolean {
+  return RULE_FIELDS.every((k) => a[k] === b[k]);
+}
+
+/** 本条规则是否有未保存改动 */
+function isDirty(rule: RuleVM): boolean {
+  return rule._snapshot === null || !ruleFieldsEqual(rule, rule._snapshot);
 }
 
 const rules = ref<RuleVM[]>([]);
@@ -223,34 +265,26 @@ function addNewRule() {
     enabled: false,
     forwardAndRecord: false,
     mockResponse: "",
-    script: null,
     delayMs: null,
     useScript: false,
+    responseVariants: [],
+    selectedVariantId: null,
     _key: key,
+    _snapshot: null,
   });
   // 新增规则自动展开
   collapsed.value[key] = false;
 }
 
+/**
+ * 保存规则自身字段：只发相对快照有变化的字段；没变化则不发请求。
+ * 变体内容不在这里——有激活变体时编辑器内容走 saveActiveResponse。
+ */
 async function saveRule(index: number) {
   const rule = rules.value[index];
   if (!rule.urlPattern) return;
 
-  if (rule.id) {
-    await updateRule({
-      id: rule.id,
-      serviceId: rule.serviceId,
-      urlPattern: rule.urlPattern,
-      isRegex: rule.isRegex,
-      method: rule.method,
-      enabled: rule.enabled,
-      forwardAndRecord: rule.forwardAndRecord,
-      mockResponse: rule.mockResponse,
-      script: rule.script || null,
-      delayMs: rule.delayMs ?? null,
-      useScript: rule.useScript,
-    });
-  } else {
+  if (!rule.id) {
     const id = await addRule({
       serviceId: form.id,
       urlPattern: rule.urlPattern,
@@ -259,26 +293,226 @@ async function saveRule(index: number) {
       enabled: rule.enabled,
       forwardAndRecord: rule.forwardAndRecord,
       mockResponse: rule.mockResponse,
-      script: rule.script || null,
       delayMs: rule.delayMs ?? null,
       useScript: rule.useScript,
     });
     rule.id = id;
     // _key 保持会话内稳定，不随保存迁移（折叠态与 DOM id 依赖它）
+    rule._snapshot = snapshotOf(rule);
+    return;
+  }
+
+  // 局部更新：只携带变化的字段，其它页面改的字段不会被这里覆盖
+  const snap = rule._snapshot ?? snapshotOf(rule);
+  const params: Parameters<typeof updateRule>[0] = { id: rule.id };
+  for (const k of RULE_FIELDS) {
+    if (k === "selectedVariantId") continue; // 激活项由变体接口维护
+    const cur = rule[k];
+    const old = snap[k];
+    if (cur !== old) {
+      // 延迟为 null/undefined 视为相同
+      if (k === "delayMs" && (cur ?? null) === (old ?? null)) continue;
+      (params as unknown as Record<string, unknown>)[k] = cur;
+    }
+  }
+  if (Object.keys(params).length === 1) return; // 只有 id，没变化
+
+  await updateRule(params);
+  rule._snapshot = snapshotOf(rule);
+}
+
+/**
+ * 保存编辑器里的响应内容：有激活变体时写变体（类型保持），否则写规则本身（走 saveRule 的脏检查）。
+ * 后端返回最新完整规则，直接回填，保证本地状态与仓库一致。
+ */
+async function saveActiveResponse(rule: RuleVM) {
+  if (!rule.id) {
+    await saveRule(rules.value.indexOf(rule));
+    return;
+  }
+  const variant = getActiveVariant(rule);
+  if (variant) {
+    const snapVariant = rule._snapshot?.responseVariants.find((v) => v.id === variant.id);
+    if (snapVariant && snapVariant.content === variant.content) return; // 没变化
+    applyServerRule(rule, await updateVariantApi(rule.id, variant.id, variant.kind, variant.content));
+  } else {
+    await saveRule(rules.value.indexOf(rule));
   }
 }
 
-function usesAdvancedMock(rule: MockRule) {
-  return Boolean(rule.useScript);
+// ==================== 响应集管理 ====================
+
+/** 获取规则当前激活的响应变体，无变体或未选中时返回 null */
+function getActiveVariant(rule: RuleVM): ResponseVariant | null {
+  if (!rule.selectedVariantId || rule.responseVariants.length === 0) return null;
+  return rule.responseVariants.find(v => v.id === rule.selectedVariantId) || null;
 }
 
-function toggleAdvancedMock(index: number, enabled: boolean | string | number) {
-  const rule = rules.value[index];
-  rule.useScript = !!enabled;
-  if (enabled && !rule.script) {
-    rule.script = 'return { code: 0, data: {} };';
+/** 当前生效响应的类型：激活变体的类型，否则规则默认响应的类型 */
+function getActiveKind(rule: RuleVM): ResponseKind {
+  return getActiveVariant(rule)?.kind ?? (rule.useScript ? "script" : "static");
+}
+
+/** 编辑器标题：响应名 + 类型 */
+function responseLabel(rule: RuleVM): string {
+  const name = getActiveVariant(rule)?.name ?? "默认";
+  const kind = getActiveKind(rule) === "script" ? "JS 脚本" : "JSON";
+  return rule.responseVariants.length > 0 ? `Mock 响应 (${kind}) — ${name}` : `Mock 响应 (${kind})`;
+}
+
+/** 编辑器占位符：随当前生效响应的类型切换 */
+function responsePlaceholder(rule: RuleVM): string {
+  return getActiveKind(rule) === "script"
+    ? "return { code: 0, data: request.query };"
+    : '{"code": 200, "data": {}}';
+}
+
+/** 获取规则当前显示的响应内容（变体优先，回退到默认响应） */
+function getActiveResponse(rule: RuleVM): string {
+  const variant = getActiveVariant(rule);
+  return variant ? variant.content : rule.mockResponse;
+}
+
+/** 设置规则当前显示的响应内容 */
+function setActiveResponse(rule: RuleVM, val: string) {
+  const variant = getActiveVariant(rule);
+  if (variant) {
+    variant.content = val;
+  } else {
+    rule.mockResponse = val;
   }
-  saveRule(index);
+}
+
+/**
+ * 切换当前生效响应的类型（JSON / JS 脚本）。
+ * 每条响应只有一个内容槽：切类型量清空内容；内容非空时先确认。
+ * - 默认响应：改 useScript + 清空 mockResponse，走 saveRule 的局部更新
+ * - 变体：调 updateVariant 整体替换类型与内容，用后端返回回填
+ */
+async function switchActiveKind(rule: RuleVM, kind: ResponseKind) {
+  if (getActiveKind(rule) === kind) return;
+  const hasContent = getActiveResponse(rule).trim() !== "";
+  if (hasContent) {
+    try {
+      await ElMessageBox.confirm(
+        `切换为${kind === "script" ? "JS 脚本" : "JSON"}将清空当前响应内容，是否继续？`,
+        "切换响应类型",
+        { confirmButtonText: "确定", cancelButtonText: "取消", type: "warning" },
+      );
+    } catch {
+      return; // 用户取消
+    }
+  }
+  const variant = getActiveVariant(rule);
+  if (variant) {
+    applyServerRule(rule, await updateVariantApi(rule.id, variant.id, kind, ""));
+  } else {
+    rule.useScript = kind === "script";
+    rule.mockResponse = "";
+    await saveRule(rules.value.indexOf(rule));
+  }
+}
+
+/**
+ * 用后端返回的最新规则回填本地条目（保留 _key / 折叠态）。
+ * 变体操作与规则变更事件都走这里，保证本地状态与仓库一致。
+ */
+function applyServerRule(local: RuleVM, server: MockRule) {
+  Object.assign(local, server, {
+    responseVariants: server.responseVariants ?? [],
+    selectedVariantId: server.selectedVariantId ?? null,
+    _snapshot: snapshotOf(server),
+  });
+}
+
+/** 选中某个响应变体；再点一次已激活的 tab 则取消激活，回退到规则本身的 mockResponse */
+async function selectVariant(rule: RuleVM, variantId: string) {
+  if (!rule.id) return;
+  const next = rule.selectedVariantId === variantId ? null : variantId;
+  applyServerRule(rule, await selectVariantApi(rule.id, next));
+}
+
+/** 响应变体右键菜单状态：记录正在操作的规则、变体与菜单位置 */
+const variantMenu = reactive<{
+  visible: boolean;
+  rule: RuleVM | null;
+  variantId: string;
+  x: number;
+  y: number;
+}>({ visible: false, rule: null, variantId: "", x: 0, y: 0 });
+
+/** 右键点击响应变体 tab：打开重命名/删除菜单 */
+function openVariantMenu(rule: RuleVM, variantId: string, e: MouseEvent) {
+  variantMenu.visible = true;
+  variantMenu.rule = rule;
+  variantMenu.variantId = variantId;
+  variantMenu.x = e.clientX;
+  variantMenu.y = e.clientY;
+}
+
+function closeVariantMenu() {
+  variantMenu.visible = false;
+}
+
+/** 菜单中的重命名操作 */
+function menuRenameVariant() {
+  if (variantMenu.rule) {
+    renameVariant(variantMenu.rule, variantMenu.variantId);
+  }
+  closeVariantMenu();
+}
+
+/** 菜单中的删除操作 */
+function menuDeleteVariant() {
+  if (variantMenu.rule) {
+    deleteVariant(variantMenu.rule, variantMenu.variantId);
+  }
+  closeVariantMenu();
+}
+
+/** 新增响应变体 */
+async function addVariant(rule: RuleVM) {
+  if (!rule.id) return;
+  // 以当前生效的内容为起点，便于在其基础上修改
+  await applyServerRule(
+    rule,
+    await addVariantApi(rule.id, `响应 ${rule.responseVariants.length + 1}`, getActiveResponse(rule) || "{}"),
+  );
+}
+
+/** 重命名响应变体 */
+function renameVariant(rule: RuleVM, variantId: string) {
+  if (!rule.id) return;
+  const variant = rule.responseVariants.find((v) => v.id === variantId);
+  if (!variant) return;
+  ElMessageBox.prompt("请输入新名称", "重命名", {
+    inputValue: variant.name,
+    confirmButtonText: "确定",
+    cancelButtonText: "取消",
+  })
+    .then(async ({ value }) => {
+      if (value) {
+        applyServerRule(rule, await renameVariantApi(rule.id, variantId, value));
+      }
+    })
+    .catch(() => {});
+}
+
+/** 删除响应变体 */
+async function deleteVariant(rule: RuleVM, variantId: string) {
+  if (!rule.id) return;
+  const variant = rule.responseVariants.find((v) => v.id === variantId);
+  if (!variant) return;
+  try {
+    await ElMessageBox.confirm(`确定删除响应 "${variant.name}" 吗？此操作不可撤销。`, "删除确认", {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      type: "warning",
+    });
+    applyServerRule(rule, await deleteVariantApi(rule.id, variantId));
+  } catch {
+    // 用户取消
+  }
 }
 
 /** 高级 Mock 脚本使用说明 */
@@ -406,10 +640,13 @@ async function loadService(id: string) {
     });
     isRunning.value = service.running;
     const ruleList = await listRules(id);
-    rules.value = ruleList.map(r => ({
+    rules.value = ruleList.map((r) => ({
       ...r,
       useScript: r.useScript,
+      responseVariants: r.responseVariants ?? [],
+      selectedVariantId: r.selectedVariantId ?? null,
       _key: r.id,
+      _snapshot: snapshotOf(r),
     }));
     // 首次加载默认全部收起
     const next: Record<string, boolean> = {};
@@ -435,7 +672,43 @@ function scrollToAndHighlight(id: string) {
   }, 800)
 }
 
+/**
+ * 处理后端推送的规则变更：另一端（MCP / 其它页面）改了规则时局部刷新。
+ * 本条有未保存改动的规则跳过，避免把用户正在编辑的内容冲掉。
+ */
+function onRuleChange(event: RuleChangeEvent) {
+  if (event.type === "deleted") {
+    if (event.serviceId !== form.id) return;
+    const idx = rules.value.findIndex((r) => r.id === event.ruleId);
+    if (idx >= 0 && !isDirty(rules.value[idx])) rules.value.splice(idx, 1);
+    return;
+  }
+  const server = event.rule;
+  if (server.serviceId !== form.id) return;
+  const local = rules.value.find((r) => r.id === server.id);
+  if (!local) {
+    // 另一端新建的规则：追加到列表（后端是最新者在前）
+    rules.value.unshift({
+      ...server,
+      responseVariants: server.responseVariants ?? [],
+      selectedVariantId: server.selectedVariantId ?? null,
+      _key: server.id,
+      _snapshot: snapshotOf(server),
+    });
+    collapsed.value[server.id] = true;
+    return;
+  }
+  if (isDirty(local)) return;
+  applyServerRule(local, server);
+}
+
 onMounted(async () => {
+  // 全局点击/滚动时关闭响应集右键菜单
+  document.addEventListener("click", closeVariantMenu);
+  document.addEventListener("scroll", closeVariantMenu, true);
+  // 常驻订阅规则变更，不随网络监控录制开关
+  await subscribeRuleChanges(onRuleChange);
+
   const id = route.query.id as string;
   const ruleId = route.query.ruleId as string;
   if (id) {
@@ -448,6 +721,11 @@ onMounted(async () => {
       scrollToAndHighlight(ruleId);
     }
   }
+});
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeVariantMenu);
+  document.removeEventListener('scroll', closeVariantMenu, true);
 });
 
 watch(
@@ -664,55 +942,73 @@ watch(
                       />
                     </div>
                   </div>
-                  <div v-if="!usesAdvancedMock(rule)" class="form-group">
-                    <CodeEditor
-                      :model-value="rule.mockResponse"
-                      language="json"
-                      label="Mock 响应 (JSON)"
-                      :rows="6"
-                      :preview-lines="6"
-                      placeholder='{"code": 200, "data": {}}'
-                      :formatter="formatJsonString"
-                      format-on-close
-                      dialog-title="编辑 Mock 响应"
-                      @update:model-value="(val: string) => { rule.mockResponse = val }"
-                      @blur="saveRule(index)"
-                      @save="saveRule(index)"
-                    />
-                  </div>
                   <div class="form-group">
-                    <div class="advanced-header">
-                      <div class="advanced-title">
-                        <label class="form-label">高级 Mock（JS 脚本）</label>
+                    <!-- 响应区头部：左变体 tab（有多条命名响应时展示），右类型切换 -->
+                    <div class="response-header">
+                      <div v-if="rule.responseVariants.length > 0" class="variant-tabs">
+                        <div
+                          v-for="variant in rule.responseVariants"
+                          :key="variant.id"
+                          class="variant-tab"
+                          :class="{ 'is-active': rule.selectedVariantId === variant.id }"
+                          @click="selectVariant(rule, variant.id)"
+                          @contextmenu.prevent="openVariantMenu(rule, variant.id, $event)"
+                        >
+                          {{ variant.name }}<span v-if="variant.kind === 'script'" class="variant-tab__kind">JS</span>
+                        </div>
+                        <div
+                          class="variant-tab variant-tab--add"
+                          title="新增响应"
+                          @click="addVariant(rule)"
+                        >
+                          +
+                        </div>
+                      </div>
+                      <div v-else class="variant-tabs">
+                        <div
+                          class="variant-tab variant-tab--add"
+                          title="新增响应"
+                          @click="addVariant(rule)"
+                        >
+                          + 响应集
+                        </div>
+                      </div>
+                      <div class="response-kind">
                         <span
+                          v-if="getActiveKind(rule) === 'script'"
                           class="help-icon"
                           title="使用说明"
                           @click="showScriptHelp"
                         >?</span>
-                      </div>
-                      <div class="advanced-actions">
-                        <el-switch
-                          :model-value="usesAdvancedMock(rule)"
-                          @change="(val: string | number | boolean) => toggleAdvancedMock(index, val)"
-                        />
+                        <el-radio-group
+                          :model-value="getActiveKind(rule)"
+                          size="small"
+                          @change="(val: string | number | boolean | undefined) => switchActiveKind(rule, val as ResponseKind)"
+                        >
+                          <el-radio-button value="static">JSON</el-radio-button>
+                          <el-radio-button value="script">JS 脚本</el-radio-button>
+                        </el-radio-group>
                       </div>
                     </div>
+                    <!-- 单一内容槽：语言 / 格式化 / 校验随当前生效响应的类型切换 -->
                     <CodeEditor
-                      v-if="usesAdvancedMock(rule)"
-                      :model-value="rule.script || ''"
-                      language="javascript"
-                      :rows="8"
-                      :preview-lines="8"
-                      placeholder="return { code: 0, data: request.query };"
-                      :formatter="formatScriptString"
-                      :validator="validateScriptString"
-                      validate-text="校验语法"
-                      format-text="格式化"
-                      dialog-title="编辑高级 Mock 脚本"
-                      :help="showScriptHelp"
-                      @update:model-value="(val: string) => { rule.script = val }"
-                      @blur="saveRule(index)"
-                      @save="saveRule(index)"
+                      :key="`${rule.id || rule._key}:${rule.selectedVariantId ?? 'default'}:${getActiveKind(rule)}`"
+                      :model-value="getActiveResponse(rule)"
+                      :language="getActiveKind(rule) === 'script' ? 'javascript' : 'json'"
+                      :label="responseLabel(rule)"
+                      :rows="getActiveKind(rule) === 'script' ? 8 : 6"
+                      :preview-lines="getActiveKind(rule) === 'script' ? 8 : 6"
+                      :placeholder="responsePlaceholder(rule)"
+                      :formatter="getActiveKind(rule) === 'script' ? formatScriptString : formatJsonString"
+                      :validator="getActiveKind(rule) === 'script' ? validateScriptString : undefined"
+                      :validate-text="getActiveKind(rule) === 'script' ? '校验语法' : ''"
+                      :format-text="getActiveKind(rule) === 'script' ? '格式化' : ''"
+                      :format-on-close="getActiveKind(rule) !== 'script'"
+                      :dialog-title="getActiveKind(rule) === 'script' ? '编辑 JS 脚本' : '编辑 Mock 响应'"
+                      :help="getActiveKind(rule) === 'script' ? showScriptHelp : undefined"
+                      @update:model-value="(val: string) => { setActiveResponse(rule, val) }"
+                      @blur="saveActiveResponse(rule)"
+                      @save="saveActiveResponse(rule)"
                     />
                   </div>
                 </div>
@@ -726,6 +1022,17 @@ watch(
         </div>
     </el-card>
     </div>
+    <!-- 响应集 tab 右键菜单：重命名 / 删除 -->
+    <Teleport to="body">
+      <div
+        v-if="variantMenu.visible"
+        class="variant-context-menu"
+        :style="{ left: variantMenu.x + 'px', top: variantMenu.y + 'px' }"
+      >
+        <div class="variant-context-menu__item" @click="menuRenameVariant">重命名</div>
+        <div class="variant-context-menu__item variant-context-menu__item--danger" @click="menuDeleteVariant">删除</div>
+      </div>
+    </Teleport>
   </main>
 </template>
 
@@ -809,6 +1116,9 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 翻转省略方向：尾部完整展示，开头用省略号代替 */
+  direction: rtl;
+  text-align: left;
 }
 
 .rule-nav__item.is-active .rule-nav__url {
@@ -978,6 +1288,9 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* 翻转省略方向：尾部完整展示，开头用省略号代替 */
+  direction: rtl;
+  text-align: left;
 }
 
 .rule-card {
@@ -1110,17 +1423,25 @@ watch(
   flex-shrink: 0;
 }
 
-.advanced-header {
+/* 响应区头部：左 tab 条、右类型切换 */
+.response-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 8px;
 }
 
-.advanced-title {
+.response-header .variant-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.response-kind {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .help-icon {
@@ -1145,10 +1466,65 @@ watch(
   border-color: #0071e3;
 }
 
-.advanced-actions {
+/* 响应集 tab条 */
+.variant-tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
+}
+
+.variant-tab {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #86868b;
+  background: #f0f0f5;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.variant-tab:hover {
+  background: #e8e8ed;
+  color: #1d1d1f;
+}
+
+.variant-tab.is-active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+}
+
+/* 脚本变体的小标记 */
+.variant-tab__kind {
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: #86868b;
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.variant-tab.is-active .variant-tab__kind {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.variant-tab--add {
+  background: transparent;
+  border: 1px dashed #d2d2d7;
+  color: #86868b;
+}
+
+.variant-tab--add:hover {
+  border-color: #0071e3;
+  color: #0071e3;
+  background: transparent;
 }
 
 @keyframes highlightFlash {
@@ -1200,5 +1576,38 @@ watch(
 .history-item__del:hover {
   color: #f56c6c;
   background-color: rgba(245, 108, 108, 0.1);
+}
+
+/* 响应集右键菜单：Teleport 到 body，scoped 命中不了，需全局 */
+.variant-context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 120px;
+  padding: 4px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.variant-context-menu__item {
+  padding: 7px 12px;
+  font-size: 13px;
+  color: #1d1d1f;
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.variant-context-menu__item:hover {
+  background: #f0f0f5;
+}
+
+.variant-context-menu__item--danger {
+  color: #f56c6c;
+}
+
+.variant-context-menu__item--danger:hover {
+  background: rgba(245, 108, 108, 0.1);
 }
 </style>

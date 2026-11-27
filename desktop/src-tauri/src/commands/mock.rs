@@ -7,8 +7,10 @@ use uuid::Uuid;
 
 use crate::state::{AppState, TauriChannelEmitter};
 use mockproxyrs_core::domain::{
-    Method, MockRule, MockRuleDTO, MockService, MockServiceDetail, ResponseEvent, ServiceStatus,
+    Method, MockRule, MockRuleDTO, MockService, MockServiceDetail, ResponseEvent, ResponseKind,
+    ServiceStatus, UpdateRuleParams,
 };
+use mockproxyrs_core::event::RuleChangeEvent;
 use mockproxyrs_core::proxy::{ProxyServer, RuleMatcher};
 use mockproxyrs_core::MockRepository;
 
@@ -217,6 +219,17 @@ pub async fn list_rules(
         .map_err(|e| e.to_string())
 }
 
+/// 获取单条规则（含响应集与激活项）
+#[tauri::command]
+pub async fn get_rule(id: String, state: State<'_, AppState>) -> Result<MockRule, String> {
+    state
+        .repository
+        .get_rule(&id)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("规则不存在: {}", id))
+}
+
 /// 添加规则
 #[tauri::command]
 pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result<String, String> {
@@ -224,76 +237,66 @@ pub async fn add_rule(params: MockRuleDTO, state: State<'_, AppState>) -> Result
     let is_regex = params.is_regex.unwrap_or(false);
     let rule = MockRule::new(
         id.clone(),
-        params.service_id.expect("service_id expect!"),
-        params.url_pattern.expect("url_pattern expect!"),
+        params.service_id.ok_or("service_id 不能为空")?,
+        params.url_pattern.ok_or("url_pattern 不能为空")?,
         is_regex,
         parse_method(&params.method.unwrap_or_default()),
         params.enabled.unwrap_or(false),
         params.forward_and_record.unwrap_or(false),
         params.mock_response.unwrap_or_default(),
-        params.script,
         params.delay_ms,
         params.use_script.unwrap_or(false),
     );
 
     state
-        .repository
-        .save_rule(&rule)
+        .rule_store()
+        .save_rule(rule)
         .await
         .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&rule.service_id) {
-        running.add_rule(rule).await;
-    }
 
     Ok(id)
 }
 
-/// 更新规则
+/// 更新规则（只改传入的字段，其余保持不变）
+///
+/// 不触碰响应变体与激活项：它们由 add_variant / select_variant 等命令单独维护，
+/// 这样本端用过期快照保存规则也不会覆盖另一端刚改的变体。
 #[tauri::command]
 pub async fn update_rule(
-    id: String,
-    service_id: String,
-    url_pattern: String,
-    is_regex: bool,
-    method: String,
-    enabled: bool,
-    forward_and_record: bool,
-    mock_response: String,
-    script: Option<String>,
-    delay_ms: Option<u64>,
-    use_script: bool,
+    params: UpdateRuleParams,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let rule = MockRule::new(
-        id.clone(),
-        service_id.clone(),
-        url_pattern,
-        is_regex,
-        parse_method(&method),
-        enabled,
-        forward_and_record,
-        mock_response,
-        script.filter(|s| !s.is_empty()),
-        delay_ms,
-        use_script,
-    );
-
     state
-        .repository
-        .save_rule(&rule)
+        .rule_store()
+        .update_rule(&params.id, |rule| {
+            if let Some(v) = params.url_pattern {
+                rule.url_pattern = v;
+            }
+            if let Some(v) = params.is_regex {
+                rule.is_regex = v;
+            }
+            if let Some(v) = params.method {
+                rule.method = parse_method(&v);
+            }
+            if let Some(v) = params.enabled {
+                rule.enabled = v;
+            }
+            if let Some(v) = params.forward_and_record {
+                rule.forward_and_record = v;
+            }
+            if let Some(v) = params.mock_response {
+                rule.mock_response = v;
+            }
+            if let Some(v) = params.delay_ms {
+                rule.delay_ms = Some(v);
+            }
+            if let Some(v) = params.use_script {
+                rule.use_script = v;
+            }
+        })
         .await
-        .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&service_id) {
-        running.update_rule(rule).await;
-    }
-
-    Ok(())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// 解析方法字符串为 Method 枚举
@@ -307,32 +310,109 @@ fn parse_method(s: &str) -> Method {
     }
 }
 
+// ==================== 响应变体 ====================
+
+/// 新增响应变体（追加到响应集末尾），kind 为 static / script，返回更新后的完整规则
+#[tauri::command]
+pub async fn add_variant(
+    rule_id: String,
+    name: String,
+    mock_response: String,
+    kind: Option<String>,
+    activate: Option<bool>,
+    state: State<'_, AppState>,
+) -> Result<MockRule, String> {
+    let kind = parse_kind(kind.as_deref())?;
+    state
+        .rule_store()
+        .add_variant(
+            &rule_id,
+            &name,
+            kind,
+            &mock_response,
+            activate.unwrap_or(true),
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 重命名响应变体，返回更新后的完整规则
+#[tauri::command]
+pub async fn rename_variant(
+    rule_id: String,
+    variant_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<MockRule, String> {
+    state
+        .rule_store()
+        .rename_variant(&rule_id, &variant_id, &name)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 更新响应变体的类型与内容（单一内容槽：切类型的同时内容被替换），返回更新后的完整规则
+#[tauri::command]
+pub async fn update_variant(
+    rule_id: String,
+    variant_id: String,
+    kind: String,
+    mock_response: String,
+    state: State<'_, AppState>,
+) -> Result<MockRule, String> {
+    let kind = parse_kind(Some(&kind))?;
+    state
+        .rule_store()
+        .update_variant(&rule_id, &variant_id, kind, &mock_response)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 解析响应类型字符串（static / script）
+fn parse_kind(s: Option<&str>) -> Result<ResponseKind, String> {
+    match s {
+        None | Some("static") => Ok(ResponseKind::Static),
+        Some("script") => Ok(ResponseKind::Script),
+        Some(other) => Err(format!("无效的响应类型: {}（可选 static / script）", other)),
+    }
+}
+
+/// 切换规则当前激活的响应变体；variant_id 为 null 表示取消激活（回退到规则本身的 mockResponse）
+#[tauri::command]
+pub async fn select_variant(
+    rule_id: String,
+    variant_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<MockRule, String> {
+    state
+        .rule_store()
+        .set_selected_variant(&rule_id, variant_id.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 删除响应变体（删激活项时回退到规则本身的 mockResponse），返回更新后的完整规则
+#[tauri::command]
+pub async fn delete_variant(
+    rule_id: String,
+    variant_id: String,
+    state: State<'_, AppState>,
+) -> Result<MockRule, String> {
+    state
+        .rule_store()
+        .delete_variant(&rule_id, &variant_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 删除规则
 #[tauri::command]
 pub async fn delete_rule(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    // 先获取规则信息
-    let rule = state
-        .repository
-        .get_rule(&id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or("规则不存在")?;
-
-    let service_id = rule.service_id.clone();
-
     state
-        .repository
+        .rule_store()
         .delete_rule(&id)
         .await
-        .map_err(|e| e.to_string())?;
-
-    // 更新运行中服务的规则
-    let services = state.services.read().await;
-    if let Some(running) = services.get(&service_id) {
-        running.delete_rule(&id).await;
-    }
-
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 /// 删除服务的所有规则
@@ -376,6 +456,16 @@ pub async fn destroy_channel(state: State<'_, AppState>) -> Result<(), String> {
     *channel = None;
     // 查询已启动的服务，将事件通道注销
 
+    Ok(())
+}
+
+/// 订阅规则变更事件（应用启动后常驻订阅，不随网络监控录制开关）
+#[tauri::command]
+pub async fn subscribe_rule_changes(
+    on_change: Channel<RuleChangeEvent>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    *state.rule_change_channel.write().await = Some(on_change);
     Ok(())
 }
 

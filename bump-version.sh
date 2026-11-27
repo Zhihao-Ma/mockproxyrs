@@ -28,11 +28,14 @@ echo "✅ 新版本:   $NEW_VER"
 echo ""
 
 # 要更新的文件
+# core 的版本随应用一起 bump：MCP 工具签名由 core 定义，serverInfo.version 取的就是 core 的版本，
+# 这个数字必须真的随工具变化而变，AI 客户端才能凭它判断是否需要重新读取 tools/list
 FILES=(
   "web/package.json"
   "desktop/package.json"
   "desktop/src-tauri/tauri.conf.json"
   "desktop/src-tauri/Cargo.toml"
+  "core/Cargo.toml"
 )
 
 # 批量替换版本
@@ -43,13 +46,13 @@ for f in "${FILES[@]}"; do
   rm -f "${f}.bak"
 done
 
-# Cargo.lock 单独精确处理：只改 name = "mockproxyrs" 块内的 version，
+# Cargo.lock 单独精确处理：只改 workspace 自有 crate（mockproxyrs / mockproxyrs-core）块内的 version，
 # 避免误改 alloc-stdlib / rand_chacha 等恰好同版本的第三方依赖
 CARGO_LOCK="Cargo.lock"
 if [ -f "$CARGO_LOCK" ]; then
   echo "🔄 更新: $CARGO_LOCK"
   awk -v new="$NEW_VER" '
-    /^name = "mockproxyrs"$/ { found=1; print; next }
+    /^name = "mockproxyrs(-core)?"$/ { found=1; print; next }
     found && /^version = / {
       gsub(/"[0-9]+\.[0-9]+\.[0-9]+"/, "\"" new "\"")
       found=0
@@ -71,5 +74,5 @@ echo ""
 echo "🎉 版本升级完成！新版本: $NEW_VER"
 echo ""
 echo "👉 提交命令（精确 add，勿用 git add . 以免卷入无关文件）："
-echo "   git add web/package.json web/package-lock.json desktop/package.json desktop/package-lock.json desktop/src-tauri/tauri.conf.json desktop/src-tauri/Cargo.toml Cargo.lock"
+echo "   git add web/package.json web/package-lock.json desktop/package.json desktop/package-lock.json desktop/src-tauri/tauri.conf.json desktop/src-tauri/Cargo.toml core/Cargo.toml Cargo.lock"
 echo "   git commit -m \"chore: bump version to $NEW_VER\""

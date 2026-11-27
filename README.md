@@ -17,7 +17,9 @@ Mockproxyrs 是一个跨平台的代理与 Mock 工具，采用模块化架构�
 
 - **反向代理** - 将请求转发到目标服务器
 - **Mock 服务** - 根据规则返回自定义响应，无需真实后端
+- **响应集** - 一条规则保存多条命名响应，一键切换当前生效的响应
 - **规则匹配** - 支持路径、方法、多维度匹配
+- **MCP 接入** - 内置 MCP 服务器，AI 客户端可直接对规则增删改查，变更即时生效
 - **事件驱动** - 实时查看请求/响应事件流
 - **数据持久化** - 使用 SQLite 存储 Mock 规则和配置
 
@@ -28,11 +30,14 @@ mockproxyrs/
 ├── core/           # 核心库 (Rust)
 │   ├── domain/     # 领域模型 (Mock规则、代理配置)
 │   ├── proxy/      # 代理服务器以及mock实现
+│   ├── mcp/        # MCP 服务器（协议、工具、HTTP 传输）
 │   ├── event/      # 事件系统
 │   └── repository/ # 数据存储层
 ├── desktop/        # 桌面应用 (Tauri 2)
+├── mcp-bridge/     # MCP stdio 桥接程序 (mockproxyrs-mcp)
 ├── server/         # 独立服务器 (计划中)
-└── web/            # Web 前端 (Vue 3)
+├── web/            # Web 前端 (Vue 3)
+└── package.json    # 根目录开发入口 (npm 脚本转发，无依赖)
 ```
 
 ## 技术栈
@@ -70,8 +75,6 @@ mockproxyrs/
 ### 安装依赖
 
 ```bash
-# 安装 Rust 依赖
-
 # 安装 Web 前端依赖
 cd web && npm install
 
@@ -79,12 +82,15 @@ cd web && npm install
 cd desktop && npm install
 ```
 
+> 根目录的 `package.json` 只是开发入口（把 `npm run dev` / `npm run build` 转发到 `desktop/`），本身没有依赖，**不需要**在根目录执行 `npm install`。
+
 ### 开发模式
+
+在根目录执行：
 
 ```bash
 # 启动桌面应用 (开发模式)
-cd desktop
-npm run tauri dev
+npm run dev
 ```
 
 这将同时启动：
@@ -95,11 +101,12 @@ npm run tauri dev
 
 ```bash
 # 构建桌面应用
-cd desktop
-npm run tauri build
+npm run build
 ```
 
 构建产物位于 `desktop/src-tauri/target/release/bundle/` 目录。
+
+以上命令等价于 `cd desktop && npm run tauri dev` / `cd desktop && npm run tauri build`（旧用法仍然有效）。前端由 Tauri 的 `beforeDevCommand` / `beforeBuildCommand` 自动启动和构建，无需单独执行。
 
 ## 核心模块说明
 
@@ -117,7 +124,13 @@ npm run tauri build
 **proxy - 代理服务器**
 - `ProxyServer` - HTTP 代理服务器，处理请求转发和 Mock 响应
 - `RuleMatcher` - 规则匹配器，根据 URL 匹配 Mock 规则
+- `RuleStore` - 规则与服务的统一存取入口：写仓库并同步到运行中的服务，IPC 命令与 MCP 共用
 - `UpstreamClient` - 上游客户端，负责转发请求到目标服务器，支持http、https
+
+**mcp - MCP 服务器**
+- `McpTools` - 工具定义与执行（服务/规则/响应集的查询与增删改）
+- `McpHttpServer` - Streamable HTTP 传输，随桌面应用运行在本机回环地址
+- `handle_message` - JSON-RPC 消息分发，传输无关
 
 **event - 事件系统**
 - `EventEmitter` - 事件发射器 trait，由不同平台实现
@@ -160,19 +173,49 @@ Vue 3 单页应用：
 url匹配模式：路径，可含参数如：/api/data；开启正则模式则填写正则表达式
 mock响应：启用状态将返回mock响应
 
-Mock 规则支持多种匹配方式：
-按优先级排序：
-1. 非正则模式路径全匹配+请求方法匹配
-2. 非正则模式路径全匹配+请求方法规则为All
-3. 非正则模式url（含参数）全匹配+请求方法匹配
-4. 非正则模式url（含参数）全匹配+请求方法规则为All
-5. 正则模式全匹配+请求方法匹配
-6. 正则模式全匹配+请求方法为All
+#### 响应集与响应类型
+
+一条规则可以保存多条命名响应（响应变体），在 Mock 响应编辑器上方以 tab 展示：
+- 点击 tab 切换当前生效的响应，同一时间只有一条生效；再点一次已激活的 tab 则取消激活，回到规则本身的默认响应
+- tab 条尾部的 `+` 新增一条响应（以当前内容为起点）并自动激活
+- 右键 tab 可重命名或删除；删除激活项后回到规则本身的默认响应
+- 没有任何响应变体时，使用规则本身的默认响应
+
+每条响应（默认响应或变体）都有自己的类型，在编辑器右上角切换：
+- **JSON**：静态响应体，原样返回
+- **JS 脚本**：函数体，通过 `return { status, headers, body }` 按请求动态生成响应；编辑器提供语法校验与格式化，tab 上以 `JS` 标记脚本变体
+
+每条响应只有一个内容槽：切换类型会清空当前内容（内容非空时先弹确认）。因此「成功 JSON / 失败 JSON / 按参数动态生成」可以作为同一条规则的三个变体并存，用 tab 切换。
+
+变体独立于规则自身字段保存：编辑 URL、开关等不会动到响应集，通过 MCP 或其它页面改的变体也会实时同步到当前页面（正在编辑、尚未保存的规则除外）。
+
+Mock 规则的 URL 匹配语义（按优先级，命中即停）：
+1. 非正则：请求 **path**（`?` 之前）与 urlPattern **完全相等**（不是前缀匹配，`/api/users` 不会命中 `/api/users/123`）；同一 urlPattern 下精确方法优先于 ALL
+2. 非正则：含 query 的**完整 URL** 与 urlPattern 完全相等（如 `/api/users?id=1`）；精确方法优先于 ALL
+3. 正则：对 path 做**部分匹配**（不锚定首尾，`/api/users` 会命中 `/api/users/123` 和 `/api/users-admin`，要全路径匹配请写 `^...$`）；多条正则同时命中时取哪条**不确定**，请让正则互不重叠
+
+注意：`enabled=false` 的规则**仍参与匹配**并会遮住后面的规则，只是命中后按透传处理。同一 urlPattern + method 的两条精确规则，后保存的覆盖先保存的。
 
 ### 网络监控
 录制功能将记录经过代理服务的真实响应以及mock响应。
 1. 若有真实响应，应用按钮可以新增规则、更新规则，将规则mock响应设置为本次真实响应
 2. 若有匹配中规则可以直接跳转到规则页
+
+### MCP（AI 接入）
+
+桌面应用内置 MCP（Model Context Protocol）服务器，AI 客户端接入后可直接查询服务、对规则和响应集增删改查；
+变更与界面上操作完全等价，对运行中的代理服务即时生效。
+
+在侧边栏底部点击「MCP」打开配置面板：设置端口（默认 27120）、启动/停止服务器、设置是否随应用自动启动，并复制客户端配置：
+
+- **HTTP（推荐）**：适用于支持 Streamable HTTP 传输的客户端（如 Claude Code、Cursor），直连 `http://127.0.0.1:27120/mcp`
+- **stdio（桥接）**：适用于只支持子进程方式拉起服务器的客户端。先构建桥接程序 `cargo build -p mockproxyrs-mcp`，
+  客户端配置中的 `command` 指向产物路径 `target/debug/mockproxyrs-mcp`，它会将 stdio 的 JSON-RPC 转发到桌面应用的 HTTP 端点
+
+两种方式都要求桌面应用处于运行状态且已启动 MCP 服务器；服务器仅监听本机回环地址。
+
+可用工具：`list_services`、`list_rules`、`get_rule`、`create_rule`、`update_rule`、`set_rule_enabled`、`delete_rule`、
+`list_response_variants`、`add_response_variant`、`select_response_variant`、`delete_response_variant`。
 
 ## 开发指南
 
