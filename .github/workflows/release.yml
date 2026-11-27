@@ -45,18 +45,30 @@ jobs:
             ### 变更内容 / Changes
 
             **响应集 / Response Sets**
-            - 规则可保存多条命名响应，在 Mock 响应编辑器上方以 tab 展示，点击切换当前生效的响应，同一时间仅一条生效
-              Rules can store multiple named responses, shown as tabs above the mock editor; click to switch the active one (exactly one active at a time)
-            - tab 尾部「+」新增响应并自动激活；右键 tab 可重命名或删除；没有任何响应时使用规则本身的 mock 响应
-              "+" appends a new response and activates it; right-click a tab to rename or delete; with no responses the rule's own mock response is used
-            - 网络监控的「应用」按钮改为写入实际生效的响应，并保留规则的脚本、延迟等其它设置
-              The network monitor "apply" action now writes to the effective response and preserves the rule's other settings
+            - 规则可保存多条命名响应，在 Mock 响应编辑器上方以 tab 展示，点击切换当前生效的响应；再点一次已激活的 tab 则取消激活，回到规则默认响应
+              Rules can store multiple named responses, shown as tabs above the mock editor; click to switch, click the active tab again to fall back to the rule's default response
+            - **每条响应（含规则默认响应）可以是 JSON 或 JS 脚本**：编辑器右上角切换，脚本可按请求动态生成状态码 / 响应头 / 响应体。切换类型会清空当前内容（非空时先确认）
+              Every response, including the rule's default, can be JSON or a JS script — switch at the top-right of the editor; scripts build status / headers / body from the request. Switching kind replaces the content (with a confirm when non-empty)
+            - tab 尾部「+」新增响应并自动激活；右键 tab 可重命名或删除；删除激活项后回到规则默认响应
+              "+" appends a new response and activates it; right-click a tab to rename or delete; deleting the active one falls back to the rule's default response
+            - 网络监控的「应用」按钮写入实际生效的那条响应，并保留规则的延迟等其它设置
+              The network monitor "apply" action writes to the effective response and preserves the rule's other settings
+
+            **多页面 / 多入口同步 / Live Sync**
+            - 通过 MCP 或其它窗口对规则、响应集的修改会实时同步到当前页面；正在编辑、尚未保存的规则不会被覆盖
+              Edits made through MCP or another window appear live; rules with unsaved local edits are left alone
+            - 保存规则只发送改动的字段，不再整条覆盖——修复了页面持有旧快照时保存规则会把 MCP 新加的响应变体冲掉的问题
+              Saving a rule now sends only the changed fields instead of overwriting the whole row; this fixes variants added via MCP being wiped when a page saved from a stale snapshot
 
             **MCP 服务器 / MCP Server**
             - 内置 MCP（Model Context Protocol）服务器，AI 客户端可查询服务、对规则与响应集增删改查，变更对运行中的代理服务即时生效
               Built-in MCP server: AI clients can list services and manage rules & response sets; changes apply to running proxies immediately
-            - 侧边栏底部新增「MCP」入口：启停服务器、设置端口（默认 27120）、随应用自动启动、一键复制 HTTP / stdio 客户端配置
-              New "MCP" entry in the sidebar: start/stop, port (default 27120), auto-start with the app, copy HTTP / stdio client config
+            - 侧边栏底部新增「MCP」入口：启停服务器、设置端口（默认 27120）、随应用自动启动、一键复制 HTTP / stdio 客户端配置，以及一段可直接发给 Agent 的接入指令
+              New "MCP" entry in the sidebar: start/stop, port (default 27120), auto-start with the app, copy HTTP / stdio client config, or copy a ready-to-send prompt that lets an AI agent install it itself
+            - 服务端 instructions 补全了脚本 API（request 字段、return 形态、限制）、响应约定（Content-Type 固定、不校验 JSON）与 URL 匹配语义（精确相等非前缀、正则不锚定、未启用规则仍参与匹配）
+              Server instructions now document the script API (request fields, return shapes, limits), response conventions (fixed Content-Type, no JSON validation) and URL matching (exact, not prefix; regex unanchored; disabled rules still match)
+            - 工具契约调整：`update_rule` 不再接受 `selected_variant_id`；变体工具的 `mock_response` 改为 `content` 并新增 `kind`；`select_response_variant` 的 `variant_id` 可为 null；新增 `rename_response_variant` / `update_response_variant`
+              Tool contract changes: `update_rule` no longer takes `selected_variant_id`; variant tools use `content` + `kind` instead of `mock_response`; `select_response_variant` accepts null; new `rename_response_variant` / `update_response_variant`
             - 新增 stdio 桥接程序 `mockproxyrs-mcp`（需自行 `cargo build -p mockproxyrs-mcp`），供只支持子进程方式的客户端使用
               New stdio bridge `mockproxyrs-mcp` (build with `cargo build -p mockproxyrs-mcp`) for clients that only support subprocess servers
 
