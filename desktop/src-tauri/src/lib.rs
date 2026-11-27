@@ -89,13 +89,21 @@ pub fn run() {
             stop_service,
             // 规则管理
             list_rules,
+            get_rule,
             add_rule,
             update_rule,
             delete_rule,
             delete_rules_by_service,
+            // 响应变体
+            add_variant,
+            rename_variant,
+            update_variant,
+            select_variant,
+            delete_variant,
             // 事件通道
             create_channel,
             destroy_channel,
+            subscribe_rule_changes,
             // 脚本校验
             validate_script,
             // MCP 服务器

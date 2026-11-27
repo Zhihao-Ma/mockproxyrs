@@ -214,6 +214,7 @@ fn text_response(status: StatusCode, body: &'static str) -> Response<Full<Bytes>
 mod tests {
     use super::*;
     use crate::domain::MockService;
+    use crate::event::NoopRuleChangeEmitter;
     use crate::proxy::RuleStore;
     use crate::repository::{MockRepository, SqliteRepository};
     use hyper_util::client::legacy::Client;
@@ -229,6 +230,7 @@ mod tests {
         Arc::new(McpTools::new(Arc::new(RuleStore::new(
             repo as Arc<dyn MockRepository>,
             services,
+            Arc::new(NoopRuleChangeEmitter),
         ))))
     }
 

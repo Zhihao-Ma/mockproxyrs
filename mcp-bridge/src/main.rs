@@ -194,6 +194,7 @@ mod tests {
     /// 桥接转发走真实 HTTP：进程内启动 MCP 服务器，验证请求回包与通知无正文
     #[tokio::test]
     async fn test_forward_against_running_mcp_server() {
+        use mockproxyrs_core::event::NoopRuleChangeEmitter;
         use mockproxyrs_core::mcp::{McpHttpServer, McpTools};
         use mockproxyrs_core::proxy::RuleStore;
         use mockproxyrs_core::repository::SqliteRepository;
@@ -201,7 +202,11 @@ mod tests {
 
         let repo = Arc::new(SqliteRepository::in_memory().unwrap());
         let services = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
-        let tools = Arc::new(McpTools::new(Arc::new(RuleStore::new(repo, services))));
+        let tools = Arc::new(McpTools::new(Arc::new(RuleStore::new(
+            repo,
+            services,
+            Arc::new(NoopRuleChangeEmitter),
+        ))));
         let server = McpHttpServer::start("127.0.0.1:0".parse().unwrap(), tools)
             .await
             .unwrap();

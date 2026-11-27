@@ -48,13 +48,23 @@ export interface MockServiceDetail {
 }
 
 /**
+ * 响应类型：静态内容或 JS 脚本
+ *
+ * 规则的默认响应与每条响应变体都有自己的类型；每条响应只有一个内容槽，切换类型意味着内容被替换。
+ */
+export type ResponseKind = "static" | "script";
+
+/**
  * Mock 响应变体（响应集管理）
  */
 export interface ResponseVariant {
   id: string;
   ruleId: string;
   name: string;
-  mockResponse: string;
+  /** 响应类型 */
+  kind: ResponseKind;
+  /** 响应内容：静态响应体或 JS 脚本（函数体），由 kind 决定 */
+  content: string;
 }
 
 /**
@@ -78,17 +88,15 @@ export interface MockRule {
   enabled: boolean;
   /** 是否转发并记录 */
   forwardAndRecord: boolean;
-  /** mock 响应内容 */
+  /** 默认响应内容：未选中任何变体时生效；useScript 为 true 时是 JS 脚本，否则是静态响应体 */
   mockResponse: string;
-  /** JS 脚本内容（为空则使用静态 mockResponse） */
-  script?: string | null;
   /** 延迟响应毫秒数 */
   delayMs?: number | null;
-  /** 是否启用脚本执行（true=执行脚本，false=使用静态 mockResponse） */
+  /** 默认响应是否为 JS 脚本（true=执行脚本，false=使用静态 mockResponse） */
   useScript: boolean;
   /** 响应变体列表 */
   responseVariants: ResponseVariant[];
-  /** 当前选中的响应变体 ID，null 表示使用规则本身的 mockResponse */
+  /** 当前选中的响应变体 ID，null 表示使用规则的默认响应 */
   selectedVariantId: string | null;
 }
 
@@ -166,6 +174,8 @@ export interface UpdateServiceParams {
 
 /**
  * 创建规则参数
+ *
+ * 新规则没有响应变体；创建后用 addVariant 追加。
  */
 export interface CreateRuleParams {
   serviceId: string;
@@ -174,30 +184,37 @@ export interface CreateRuleParams {
   method?: Method;
   enabled: boolean;
   forwardAndRecord?: boolean;
+  /** 默认响应内容（useScript 为 true 时是 JS 脚本） */
   mockResponse: string;
-  script?: string | null;
   delayMs?: number | null;
   useScript?: boolean;
-  responseVariants?: ResponseVariant[];
-  selectedVariantId?: string | null;
 }
 
 /**
- * 更新规则参数
+ * 更新规则参数（只传要改的字段，未传的保持不变）
+ *
+ * 多个页面同时编辑同一规则时各自只写自己改过的字段，互不覆盖。
+ * 响应变体与激活项不在这里，由 addVariant / selectVariant 等专用接口维护。
  */
 export interface UpdateRuleParams {
   id: string;
-  serviceId: string;
-  urlPattern: string;
-  isRegex: boolean;
+  urlPattern?: string;
+  isRegex?: boolean;
   /** HTTP 方法（ALL/GET/POST/PUT/DELETE，大小写不敏感） */
-  method: Method | string;
-  enabled: boolean;
-  forwardAndRecord: boolean;
-  mockResponse: string;
-  script?: string | null;
+  method?: Method | string;
+  enabled?: boolean;
+  forwardAndRecord?: boolean;
+  /** 默认响应内容（useScript 为 true 时是 JS 脚本） */
+  mockResponse?: string;
   delayMs?: number | null;
-  useScript: boolean;
-  responseVariants: ResponseVariant[];
-  selectedVariantId: string | null;
+  useScript?: boolean;
 }
+
+/**
+ * 规则变更事件（从后端推送，type 为区分字段的标签）
+ *
+ * 规则被任一入口（本页面、MCP、将来的 web 端）改动后推送；前端据此局部刷新。
+ */
+export type RuleChangeEvent =
+  | { type: "updated"; rule: MockRule }
+  | { type: "deleted"; ruleId: string; serviceId: string };

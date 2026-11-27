@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useRouter } from "vue-router";
-import { createChannel, destroyChannel, addRule, updateRule, listRules } from "@/api";
+import { createChannel, destroyChannel, addRule, updateRule, updateVariant, getRule } from "@/api";
 import { useNetworkStore } from "@/stores/network";
 import { storeToRefs } from "pinia";
 import type { ResponseEvent } from "@/types";
@@ -68,24 +68,27 @@ async function applyRule(row: ResponseEvent) {
     // row 是 logData 中对应项的引用（slice/filter 共享元素引用），直接赋值即可同步更新。
     row.matchedRuleId = ruleId;
   } else {
-    // 以已保存的规则为基底更新，避免把响应集、脚本、延迟等本操作不涉及的字段冲掉
-    const existing = (await listRules(row.serviceId)).find((r) => r.id === row.matchedRuleId);
+    // 读一次最新规则，只为了知道当前激活的是哪个变体；写入时只发改动的字段（部分更新），
+    // 其它页面改的字段不会被这里覆盖。
+    // 写入实际生效的那条响应：有激活的变体则写入变体（切为静态，脚本内容被替换），否则写入规则默认响应。
+    const ruleId = row.matchedRuleId;
+    const existing = await getRule(ruleId);
     if (!existing) return;
-    // 写入实际生效的那条响应：有激活的变体则更新变体，否则更新规则本身的 mockResponse
-    const activeVariant = existing.responseVariants.find((v) => v.id === existing.selectedVariantId);
-    const responseVariants = activeVariant
-      ? existing.responseVariants.map((v) =>
-          v.id === activeVariant.id ? { ...v, mockResponse: row.responseBody } : v,
-        )
-      : existing.responseVariants;
-    await updateRule({
-      ...existing,
-      enabled: true,
-      forwardAndRecord: true,
-      mockResponse: activeVariant ? existing.mockResponse : row.responseBody,
-      responseVariants,
-      useScript: false,
-    });
+    const activeVariant = existing.responseVariants.find((v) => v.id === existing.selectedVariantId) ?? null;
+    if (activeVariant) {
+      // 录制的响应是静态内容，应用到脚本变体上 = 切为静态并替换；规则开关另行更新
+      await updateVariant(ruleId, activeVariant.id, "static", row.responseBody);
+      await updateRule({ id: ruleId, enabled: true, forwardAndRecord: true });
+    } else {
+      // 写入默认响应：切为静态（录制的响应是静态内容）并替换，同时打开规则开关
+      await updateRule({
+        id: ruleId,
+        enabled: true,
+        forwardAndRecord: true,
+        useScript: false,
+        mockResponse: row.responseBody,
+      });
+    }
   }
 }
 

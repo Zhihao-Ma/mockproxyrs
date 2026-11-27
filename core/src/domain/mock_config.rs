@@ -18,6 +18,29 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// 响应类型：静态内容或 JS 脚本
+///
+/// 规则的默认响应与每条响应变体都有自己的类型；每条响应只有一个内容槽，
+/// 切换类型意味着内容被替换。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ResponseKind {
+    /// 静态响应体，原样返回
+    #[default]
+    Static,
+    /// JS 脚本（函数体，return 返回响应），按请求动态生成
+    Script,
+}
+
+impl std::fmt::Display for ResponseKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ResponseKind::Static => f.write_str("static"),
+            ResponseKind::Script => f.write_str("script"),
+        }
+    }
+}
+
 /// Mock 响应变体（响应集管理）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +50,11 @@ pub struct MockResponseVariant {
     pub rule_id: String,
     /// 变体名称（用户可辨识的标签）
     pub name: String,
-    /// 响应体内容
-    pub mock_response: String,
+    /// 响应类型
+    #[serde(default)]
+    pub kind: ResponseKind,
+    /// 响应内容：静态响应体或 JS 脚本（函数体），由 `kind` 决定
+    pub content: String,
 }
 
 /// Mock 服务配置（持久化）
@@ -144,21 +170,18 @@ pub struct MockRule {
     pub enabled: bool,
     /// 是否转发并记录（true=转发请求并记录响应，false=直接返回 mock 响应）
     pub forward_and_record: bool,
-    /// mock 响应内容
+    /// 默认响应内容：未选中任何响应变体时生效；`use_script` 为 true 时是 JS 脚本，否则是静态响应体
     pub mock_response: String,
-    /// JS 脚本内容（为空则使用静态 mock_response）
-    #[serde(default)]
-    pub script: Option<String>,
     /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
     #[serde(default)]
     pub delay_ms: Option<u64>,
-    /// 是否启用脚本执行（true=执行 script 生成响应，false=使用静态 mock_response）
+    /// 默认响应是否为 JS 脚本（true=执行脚本，false=使用静态 mock_response）
     #[serde(default)]
     pub use_script: bool,
     /// 响应变体列表（响应集管理）
     #[serde(default)]
     pub response_variants: Vec<MockResponseVariant>,
-    /// 当前选中的响应变体 ID，None 表示使用规则本身的 mock_response
+    /// 当前选中的响应变体 ID，None 表示使用规则的默认响应
     #[serde(default)]
     pub selected_variant_id: Option<String>,
 }
@@ -179,54 +202,40 @@ pub struct MockRuleDTO {
     pub enabled: Option<bool>,
     /// 是否转发并记录（true=转发请求并记录响应，false=直接返回 mock 响应）
     pub forward_and_record: Option<bool>,
-    /// mock 响应内容
+    /// 默认响应内容（use_script 为 true 时是 JS 脚本）
     pub mock_response: Option<String>,
-    /// JS 脚本内容（为空则使用静态 mock_response）
-    #[serde(default)]
-    pub script: Option<String>,
     /// 延迟响应毫秒数（静态/脚本 mock/转发通用）
     #[serde(default)]
     pub delay_ms: Option<u64>,
-    /// 是否启用脚本执行
+    /// 默认响应是否为 JS 脚本
     #[serde(default)]
     pub use_script: Option<bool>,
-    /// 响应变体列表
-    #[serde(default)]
-    pub response_variants: Option<Vec<MockResponseVariant>>,
-    /// 当前选中的响应变体 ID
-    #[serde(default)]
-    pub selected_variant_id: Option<String>,
 }
 
 /// 更新规则的参数（IPC 契约，字段与前端 `UpdateRuleParams` 一致）
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+///
+/// 只携带要修改的字段，未携带（None）的字段保持不变——多个页面同时编辑同一规则时，
+/// 各自只写自己改过的字段，互不覆盖。响应变体与激活项不在此处，由专用的变体命令维护。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateRuleParams {
     pub id: String,
-    pub service_id: String,
     /// URL 匹配模式
-    pub url_pattern: String,
+    pub url_pattern: Option<String>,
     /// 是否为正则匹配（true=正则匹配，false=精确匹配）
-    pub is_regex: bool,
+    pub is_regex: Option<bool>,
     /// HTTP 方法字符串（ALL/GET/POST/PUT/DELETE，大小写不敏感）
-    pub method: String,
+    pub method: Option<String>,
     /// 是否启用 mock
-    pub enabled: bool,
+    pub enabled: Option<bool>,
     /// 是否转发并记录
-    pub forward_and_record: bool,
-    /// mock 响应内容
-    pub mock_response: String,
-    /// JS 脚本内容（为空则使用静态 mock_response）
-    pub script: Option<String>,
+    pub forward_and_record: Option<bool>,
+    /// 默认响应内容（use_script 为 true 时是 JS 脚本）
+    pub mock_response: Option<String>,
     /// 延迟响应毫秒数
     pub delay_ms: Option<u64>,
-    /// 是否启用脚本执行
-    pub use_script: bool,
-    /// 响应变体列表
-    #[serde(default)]
-    pub response_variants: Vec<MockResponseVariant>,
-    /// 当前选中的响应变体 ID
-    pub selected_variant_id: Option<String>,
+    /// 默认响应是否为 JS 脚本
+    pub use_script: Option<bool>,
 }
 
 impl MockRule {
@@ -239,7 +248,6 @@ impl MockRule {
         enabled: bool,
         forward_and_record: bool,
         mock_response: String,
-        script: Option<String>,
         delay_ms: Option<u64>,
         use_script: bool,
     ) -> Self {
@@ -252,7 +260,6 @@ impl MockRule {
             enabled,
             forward_and_record,
             mock_response,
-            script,
             delay_ms,
             use_script,
             response_variants: Vec::new(),
@@ -260,17 +267,26 @@ impl MockRule {
         }
     }
 
-    /// 当前生效的静态 mock 响应
+    /// 默认响应的类型
+    pub fn default_kind(&self) -> ResponseKind {
+        if self.use_script {
+            ResponseKind::Script
+        } else {
+            ResponseKind::Static
+        }
+    }
+
+    /// 当前生效的响应（类型 + 内容）
     ///
-    /// 选中了响应变体（`selected_variant_id` 指向存在的变体）则返回变体内容，
-    /// 否则回退到规则本身的 `mock_response`；选中的变体已被删除时同样回退。
-    pub fn effective_mock_response(&self) -> String {
+    /// 选中了响应变体（`selected_variant_id` 指向存在的变体）则返回该变体，
+    /// 否则回退到规则的默认响应；选中的变体已被删除时同样回退。
+    pub fn effective_response(&self) -> (ResponseKind, String) {
         if let Some(variant_id) = &self.selected_variant_id
             && let Some(variant) = self.response_variants.iter().find(|v| &v.id == variant_id)
         {
-            return variant.mock_response.clone();
+            return (variant.kind, variant.content.clone());
         }
-        self.mock_response.clone()
+        (self.default_kind(), self.mock_response.clone())
     }
 }
 
@@ -477,7 +493,6 @@ mod tests {
             false,
             r#"{"code": 200}"#.to_string(),
             None,
-            None,
             false,
         );
 
@@ -613,7 +628,6 @@ mod tests {
             true,
             r#"{"code": 201}"#.to_string(),
             None,
-            None,
             false,
         );
 
@@ -623,7 +637,7 @@ mod tests {
     }
 
     #[test]
-    fn test_mock_rule_serde_defaults_script_and_delay() {
+    fn test_mock_rule_serde_defaults_delay_and_variants() {
         let json = r#"{
             "id":"rule-1",
             "serviceId":"svc-1",
@@ -636,8 +650,8 @@ mod tests {
         }"#;
 
         let rule: MockRule = serde_json::from_str(json).unwrap();
-        assert_eq!(rule.script, None);
         assert_eq!(rule.delay_ms, None);
+        assert!(!rule.use_script, "默认响应默认为静态");
         // 响应集字段缺省：无变体、未选中
         assert!(rule.response_variants.is_empty());
         assert_eq!(rule.selected_variant_id, None);
@@ -652,13 +666,20 @@ mod tests {
             id: id.to_string(),
             rule_id: "rule-1".to_string(),
             name: format!("变体 {}", id),
-            mock_response: body.to_string(),
+            kind: ResponseKind::Static,
+            content: body.to_string(),
         }
     }
 
-    #[test]
-    fn test_effective_mock_response_without_variants() {
-        let rule = MockRule::new(
+    fn script_variant(id: &str, body: &str) -> MockResponseVariant {
+        MockResponseVariant {
+            kind: ResponseKind::Script,
+            ..variant(id, body)
+        }
+    }
+
+    fn base_rule() -> MockRule {
+        MockRule::new(
             "rule-1".into(),
             "svc".into(),
             "/a".into(),
@@ -668,56 +689,98 @@ mod tests {
             false,
             "base".into(),
             None,
-            None,
             false,
-        );
-        assert_eq!(rule.effective_mock_response(), "base");
+        )
     }
 
     #[test]
-    fn test_effective_mock_response_uses_selected_variant() {
-        let mut rule = MockRule::new(
-            "rule-1".into(),
-            "svc".into(),
-            "/a".into(),
-            false,
-            Method::Get,
-            true,
-            false,
-            "base".into(),
-            None,
-            None,
-            false,
+    fn test_effective_response_without_variants() {
+        let rule = base_rule();
+        assert_eq!(rule.default_kind(), ResponseKind::Static);
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Static, "base".into())
         );
+
+        // 默认响应是脚本
+        let mut rule = base_rule();
+        rule.use_script = true;
+        rule.mock_response = "return {};".into();
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Script, "return {};".into())
+        );
+    }
+
+    #[test]
+    fn test_effective_response_uses_selected_variant() {
+        let mut rule = base_rule();
         rule.response_variants = vec![variant("v1", "one"), variant("v2", "two")];
 
         // 有变体但未选中 → 仍用规则本身
-        assert_eq!(rule.effective_mock_response(), "base");
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Static, "base".into())
+        );
 
         rule.selected_variant_id = Some("v2".into());
-        assert_eq!(rule.effective_mock_response(), "two");
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Static, "two".into())
+        );
 
         // 选中的变体已不存在 → 回退，不 panic
         rule.selected_variant_id = Some("missing".into());
-        assert_eq!(rule.effective_mock_response(), "base");
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Static, "base".into())
+        );
+    }
+
+    #[test]
+    fn test_effective_response_variant_kind_overrides_default() {
+        let mut rule = base_rule();
+        // 默认响应是脚本，但选中的变体是静态 → 以变体为准
+        rule.use_script = true;
+        rule.mock_response = "return {};".into();
+        rule.response_variants = vec![variant("v1", "one"), script_variant("v2", "return 1;")];
+
+        rule.selected_variant_id = Some("v1".into());
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Static, "one".into())
+        );
+
+        rule.selected_variant_id = Some("v2".into());
+        assert_eq!(
+            rule.effective_response(),
+            (ResponseKind::Script, "return 1;".into())
+        );
+    }
+
+    #[test]
+    fn test_response_kind_serde() {
+        assert_eq!(
+            serde_json::to_string(&ResponseKind::Static).unwrap(),
+            r#""static""#
+        );
+        assert_eq!(
+            serde_json::to_string(&ResponseKind::Script).unwrap(),
+            r#""script""#
+        );
+        let parsed: ResponseKind = serde_json::from_str(r#""script""#).unwrap();
+        assert_eq!(parsed, ResponseKind::Script);
+        assert_eq!(ResponseKind::default(), ResponseKind::Static);
+        // 变体 JSON 缺少 kind 时默认为静态
+        let v: MockResponseVariant =
+            serde_json::from_str(r#"{"id":"v1","ruleId":"r","name":"n","content":"{}"}"#).unwrap();
+        assert_eq!(v.kind, ResponseKind::Static);
     }
 
     #[test]
     fn test_mock_rule_variants_serde_roundtrip() {
-        let mut rule = MockRule::new(
-            "rule-1".into(),
-            "svc".into(),
-            "/a".into(),
-            false,
-            Method::Get,
-            true,
-            false,
-            "base".into(),
-            None,
-            None,
-            false,
-        );
-        rule.response_variants = vec![variant("v1", "one")];
+        let mut rule = base_rule();
+        rule.response_variants = vec![variant("v1", "one"), script_variant("v2", "return 2;")];
         rule.selected_variant_id = Some("v1".into());
 
         let json = serde_json::to_string(&rule).unwrap();

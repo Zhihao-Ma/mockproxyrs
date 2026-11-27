@@ -15,7 +15,7 @@ use log::{error, info};
 use tokio::net::TcpListener;
 use tokio::sync::{RwLock, watch};
 
-use crate::domain::{MockRule, MockService, ResponseEvent};
+use crate::domain::{MockRule, MockService, ResponseEvent, ResponseKind};
 use crate::error::{MockproxyrsError, Result};
 use crate::event::EventEmitter;
 use crate::mock::{RequestContext, ScriptEngine, ScriptMockResponse, execute_script};
@@ -271,11 +271,11 @@ async fn handle_request(
     let is_mock = matched_rule.is_some_and(|r| r.enabled);
     let forward_and_record = matched_rule.is_some_and(|r| r.forward_and_record);
     let matched_rule_id = matched_rule.map(|r| r.id.clone());
-    let mock_response = matched_rule.map(MockRule::effective_mock_response);
-    let use_script = matched_rule.is_some_and(|r| r.use_script);
-    let script = matched_rule
-        .and_then(|r| r.script.clone())
-        .filter(|s| !s.trim().is_empty());
+    // 激活的响应（类型 + 内容）：选中变体时以变体为准，否则为规则默认响应
+    let (active_kind, active_content) = matched_rule
+        .map(MockRule::effective_response)
+        .unwrap_or((ResponseKind::Static, String::new()));
+    let use_script = is_mock && active_kind == ResponseKind::Script;
     let delay_ms = matched_rule.and_then(|r| r.delay_ms).unwrap_or(0);
     let url_pattern = matched_rule.map(|r| r.url_pattern.clone());
     let is_regex = matched_rule.is_some_and(|r| r.is_regex);
@@ -287,12 +287,14 @@ async fn handle_request(
         url, config.name, is_mock, forward_and_record
     );
 
-    let mut mock_body_for_event = if is_mock { mock_response.clone() } else { None };
+    let mut mock_body_for_event = if is_mock {
+        Some(active_content.clone())
+    } else {
+        None
+    };
 
     // 决定处理方式
-    let (response, response_body) = if is_mock && use_script {
-        #[allow(clippy::unnecessary_unwrap)]
-        let script = script.expect("script checked above");
+    let (response, response_body) = if use_script {
         let request_context = RequestContext::new(
             method.clone(),
             url.clone(),
@@ -300,7 +302,7 @@ async fn handle_request(
             request_body.clone(),
         );
 
-        match execute_script((*script_engine).clone(), request_context, script).await {
+        match execute_script((*script_engine).clone(), request_context, active_content).await {
             Ok(script_response) => {
                 mock_body_for_event = Some(script_response.body.clone());
                 let response = build_script_response(script_response);
@@ -332,7 +334,7 @@ async fn handle_request(
 
                 // 如果是 mock 且转发，返回 mock 响应
                 if is_mock {
-                    let mock_resp = build_mock_response(&mock_response.clone().unwrap_or_default());
+                    let mock_resp = build_mock_response(&active_content);
                     (mock_resp, body_str)
                 } else {
                     let resp = Response::from_parts(parts, full(bytes));
@@ -343,7 +345,7 @@ async fn handle_request(
                 error!("Error forwarding request: {}", e);
                 // 开启 mock（转发录制模式）时，上游转发失败仍应返回 mock 响应
                 if is_mock {
-                    let mock_resp = build_mock_response(&mock_response.clone().unwrap_or_default());
+                    let mock_resp = build_mock_response(&active_content);
                     (mock_resp, e.to_string())
                 } else {
                     let resp = build_error_response(&e.to_string());
@@ -353,7 +355,7 @@ async fn handle_request(
         }
     } else {
         // 直接返回 mock 响应
-        let mock_resp = build_mock_response(&mock_response.clone().unwrap_or_default());
+        let mock_resp = build_mock_response(&active_content);
         (mock_resp, String::new())
     };
 
@@ -471,6 +473,7 @@ fn full<T: Into<Bytes>>(chunk: T) -> HttpBody {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::MockResponseVariant;
     use hyper::header::HeaderMap;
 
     #[test]
@@ -652,7 +655,6 @@ mod tests {
                 true,
                 r#"{"mocked":true}"#.to_string(),
                 None,
-                None,
                 false,
             );
             rules.insert(rule.id.clone(), rule);
@@ -686,6 +688,83 @@ mod tests {
             .expect("failed to read body")
             .to_bytes();
         assert!(String::from_utf8_lossy(&body).contains("\"code\":500"));
+
+        shutdown_tx.send(true).expect("failed to send shutdown");
+    }
+
+    /// 激活的响应变体是脚本时，走脚本路径并返回脚本输出；默认响应的类型被变体覆盖
+    #[tokio::test]
+    async fn test_active_script_variant_runs_script() {
+        let (proxy_addr, shutdown_tx) = spawn_proxy_with_unreachable_upstream(|rules| {
+            let mut rule = MockRule::new(
+                "rule-script".to_string(),
+                "svc-1".to_string(),
+                "/api/script".to_string(),
+                false,
+                crate::domain::Method::All,
+                true,
+                false,
+                r#"{"default":true}"#.to_string(),
+                None,
+                false,
+            );
+            // 默认响应是静态 JSON，但选中的变体是脚本
+            rule.response_variants = vec![MockResponseVariant {
+                id: "v-script".to_string(),
+                rule_id: "rule-script".to_string(),
+                name: "动态".to_string(),
+                kind: ResponseKind::Script,
+                content: r#"return { status: 201, body: JSON.stringify({ from: 'script', q: request.query.name }) };"#.to_string(),
+            }];
+            rule.selected_variant_id = Some("v-script".to_string());
+            rules.insert(rule.id.clone(), rule);
+
+            // 对照：默认响应是脚本，选中静态变体 → 走静态
+            let mut rule = MockRule::new(
+                "rule-static".to_string(),
+                "svc-1".to_string(),
+                "/api/static".to_string(),
+                false,
+                crate::domain::Method::All,
+                true,
+                false,
+                "return { status: 500, body: 'should not run' };".to_string(),
+                None,
+                true,
+            );
+            rule.response_variants = vec![MockResponseVariant {
+                id: "v-static".to_string(),
+                rule_id: "rule-static".to_string(),
+                name: "周定".to_string(),
+                kind: ResponseKind::Static,
+                content: r#"{"from":"variant"}"#.to_string(),
+            }];
+            rule.selected_variant_id = Some("v-static".to_string());
+            rules.insert(rule.id.clone(), rule);
+        })
+        .await;
+
+        // 脚本变体：状态码与请求上下文都来自脚本
+        let resp = send_get(proxy_addr, "/api/script?name=abc").await;
+        assert_eq!(resp.status(), 201);
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert_eq!(body, r#"{"from":"script","q":"abc"}"#);
+
+        // 默认响应是脚本，但激活的是静态变体 → 返回静态内容，不跑脚本
+        let resp = send_get(proxy_addr, "/api/static").await;
+        assert_eq!(resp.status(), 200);
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("failed to read body")
+            .to_bytes();
+        assert_eq!(body, r#"{"from":"variant"}"#);
 
         shutdown_tx.send(true).expect("failed to send shutdown");
     }
