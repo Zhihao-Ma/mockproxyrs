@@ -18,9 +18,10 @@
 /**
  * MCP 服务器配置弹窗
  *
- * 启停 MCP 服务器、设置端口与自动启动，并提供两种 AI 客户端接入方式的配置片段：
+ * 启停 MCP 服务器、设置端口与自动启动，并提供 AI 客户端接入方式的配置片段：
  * - HTTP：直连桌面应用内的 MCP 端点（支持 Streamable HTTP 的客户端）
  * - stdio：通过 mockproxyrs-mcp 桥接程序（只支持子进程方式拉起服务器的客户端）
+ * - 「复制给 Agent」：一段自然语言指令，贴给能自行配置 MCP 的 AI Agent（如 Claude Code）即可完成接入
  */
 import { computed } from "vue";
 import { ElMessage } from "element-plus";
@@ -52,6 +53,27 @@ const stdioConfig = computed(() =>
     2
   )
 );
+
+/**
+ * 给 Agent 的一段话：包含它完成接入所需的全部信息（是什么、怎么连、连上后怎么验证）。
+ * 走 HTTP，不依赖本地构建桥接程序；端口用当前设置。
+ */
+const agentPrompt = computed(() => {
+  const url = `http://127.0.0.1:${store.prefs.port}/mcp`;
+  return [
+    "请把下面这个 MCP 服务器加到你的 MCP 配置里（Streamable HTTP 传输）：",
+    "",
+    "- 名称：mockproxyrs",
+    `- URL：${url}`,
+    "- 它是 Mockproxyrs 桌面应用内置的 Mock 规则管理接口，可以查询服务、增删改 Mock 规则与响应集，改动对代理立即生效。",
+    "",
+    "配置格式参考（按你所用客户端的实际格式调整）：",
+    JSON.stringify({ mcpServers: { mockproxyrs: { type: "http", url } } }, null, 2),
+    "",
+    "加完后请求 tools/list，能看到 list_services、list_rules、create_rule 等工具就说明接通了；",
+    "然后调 list_services 拿到 serviceId 就可以开始操作规则。工具的参数含义与 URL 匹配规则都在服务端返回的 instructions 里，请先读一遍。",
+  ].join("\n");
+});
 
 async function copy(text: string) {
   try {
@@ -132,6 +154,17 @@ async function copy(text: string) {
           <code>command</code> 改为它的实际路径。
         </p>
         <pre class="mcp-config__code">{{ stdioConfig }}</pre>
+      </div>
+
+      <div class="mcp-config mcp-config--agent">
+        <div class="mcp-config__header">
+          <span class="mcp-config__title">方式三：直接交给 Agent 安装</span>
+          <el-button text size="small" :icon="DocumentCopy" @click="copy(agentPrompt)">复制</el-button>
+        </div>
+        <p class="mcp-config__desc">
+          适用于能自己修改 MCP 配置的 AI Agent（如 Claude Code）。复制下面这段话发给它，它会自行完成配置并验证连通。
+        </p>
+        <pre class="mcp-config__code mcp-config__code--text">{{ agentPrompt }}</pre>
       </div>
     </div>
 
@@ -276,6 +309,17 @@ async function copy(text: string) {
   line-height: 1.6;
   overflow-x: auto;
   user-select: text;
+  white-space: pre;
+}
+
+/* 自然语言段落：允许自动换行，不然横向滚动很难读 */
+.mcp-config__code--text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mcp-config--agent {
+  background: rgba(0, 113, 227, 0.04);
 }
 
 .dialog-footer {
